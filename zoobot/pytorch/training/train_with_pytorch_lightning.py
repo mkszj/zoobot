@@ -12,15 +12,23 @@ from pytorch_lightning.loggers import CSVLogger
 
 from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
 from galaxy_datasets.pytorch.webdatamodule import WebDataModule
+from galaxy_datasets import transforms
 
 from zoobot.pytorch.estimators import define_model
 from zoobot.shared import save_predictions
+from zoobot.shared.schemas import Schema
 
+from omegaconf import OmegaConf
 
 def train_default_zoobot_from_scratch(    
     # absolutely crucial arguments
     save_dir: str,  # save model here
-    schema,  # answer these questions
+    schema: Schema,  # answer these questions
+    # augmentation parameters are required, see github/mwalmsley/galaxy-datasets
+    # specify either one transform_cfg for both train and inference, or two separate ones
+    transform_cfg: None,
+    train_transform_cfg: None,
+    inference_transform_cfg: None,
     # input data - specify *either* catalog (to be split) or the splits themselves
     catalog=None,
     train_catalog=None,
@@ -42,11 +50,7 @@ def train_default_zoobot_from_scratch(
     betas=(0.9, 0.999),
     weight_decay=0.01,
     scheduler_params={},
-    # data and augmentation parameters
-    color=False,
-    resize_after_crop=224,
-    crop_scale_bounds=(0.7, 0.8),
-    crop_ratio_bounds=(0.9, 1.1),
+    # data 
     # hardware parameters
     nodes=1,
     gpus=2,
@@ -129,13 +133,19 @@ def train_default_zoobot_from_scratch(
             pass # another gpu process may have just made it
     logging.info(f'Saving to {save_dir}')
 
-    if color:
-        logging.warning(
-            'Training on color images, not converting to greyscale')
-        channels = 3
+    # if user only passed one transform_cfg, use it for both train and inference
+    if transform_cfg is not None:
+        assert train_transform_cfg is None
+        assert inference_transform_cfg is None
+        train_transform_cfg = transform_cfg
+        inference_transform_cfg = transform_cfg
+    # if user passed two transform_cfgs, use them separately
     else:
-        logging.info('Converting images to greyscale before training')
-        channels = 1
+        assert train_transform_cfg is not None
+        assert inference_transform_cfg is not None
+
+    logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
+    logging.info(f'Using inference_transform_cfg: {inference_transform_cfg}')
 
     strategy = 'auto'
     plugins = None
@@ -196,10 +206,12 @@ def train_default_zoobot_from_scratch(
             'nodes': nodes,
             'precision': precision,
             'batch_size': batch_size,
-            'greyscale': not color,
-            'crop_scale_bounds': crop_scale_bounds,
-            'crop_ratio_bounds': crop_ratio_bounds,
-            'resize_after_crop': resize_after_crop,
+            # 'greyscale': not color,
+            # 'crop_scale_bounds': crop_scale_bounds,
+            # 'crop_ratio_bounds': crop_ratio_bounds,
+            # 'resize_after_crop': resize_after_crop,
+            'train_transform_cfg': train_transform_cfg,
+            'inference_transform_cfg': inference_transform_cfg,
             'num_workers': num_workers,
             'prefetch_factor': prefetch_factor,
             'framework': 'pytorch'
@@ -227,16 +239,12 @@ def train_default_zoobot_from_scratch(
                 'val_catalog': val_catalog,
                 'test_catalog': test_catalog  # may be None
             }
-        assert crop_scale_bounds[1] < 1  # zoom in for albumentations
         datamodule = GalaxyDataModule(
             label_cols=schema.label_cols,
             # can take either a catalog (and split it), or a pre-split catalog
             **data_to_use,
-            # augmentations parameters
-            greyscale=not color,
-            crop_scale_bounds=crop_scale_bounds,
-            crop_ratio_bounds=crop_ratio_bounds,
-            resize_after_crop=resize_after_crop,
+            # augmentations parameters, now using torchvision
+            custom_torchvision_transform=(train_transform_cfg, inference_transform_cfg),
             # hardware parameters
             batch_size=batch_size, # on 2xA100s, 256 with DDP, 512 with distributed (i.e. split batch)
             num_workers=num_workers,
@@ -245,32 +253,7 @@ def train_default_zoobot_from_scratch(
     else:
         assert webdatasets  # train_urls is not None
         # this branch will use WebDataModule to load premade webdatasets
-
-        # temporary: use SSL-like transform
-        # ADDED BACK FOR EUCLID
-        # from foundation.models import transforms
-        # moved to galaxy_datasets (public)
-        from galaxy_datasets import transforms
-
-        train_transform_cfg = transforms.default_view_config()
-        train_transform_cfg.greyscale = not color
-        assert crop_scale_bounds[1] > 1
-        train_transform_cfg.random_affine['scale'] = crop_scale_bounds  # no, just use 1.2-1.4 default
-        # train_transform_cfg.random_affine['scale'] = (1.1, 1.2)
-        train_transform_cfg.random_affine['shear'] = None  # disable
-        train_transform_cfg.random_affine['translate'] = None  # disable
-        train_transform_cfg.erase_iterations = 0  # disable
-
-        # train_transform_cfg = transforms.minimal_view_config()
-        
-        inference_transform_cfg = transforms.minimal_view_config()
-        inference_transform_cfg.greyscale = not color
-
-        train_transform_cfg.output_size = resize_after_crop
-        inference_transform_cfg.output_size = resize_after_crop
-
-        logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
-        logging.info(f'Using inference_transform_cfg: {inference_transform_cfg}')
+        # uses new torchvision transforms         
 
         datamodule = WebDataModule(
             train_urls=train_urls,
@@ -283,12 +266,8 @@ def train_default_zoobot_from_scratch(
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
             cache_dir=cache_dir,
-            # augmentation args
-            greyscale=not color,
-            crop_scale_bounds=crop_scale_bounds,
-            crop_ratio_bounds=crop_ratio_bounds,
-            resize_after_crop=resize_after_crop,
-            # temporary: use SSL-like transform
+            # augmentation args REMOVED
+            # uses new torchvision transforms
             train_transform=transforms.GalaxyViewTransform(train_transform_cfg),
             inference_transform=transforms.GalaxyViewTransform(inference_transform_cfg),
         )
@@ -301,7 +280,13 @@ def train_default_zoobot_from_scratch(
         assert images.max() <= 1.0001
         assert images.min() >= -0.0001
         break
-    # exit()
+
+    if train_transform_cfg.greyscale:
+        logging.info('Converting images to greyscale before training, setting channels=1')
+        channels = 1
+    else:
+        logging.warning('Training on color images, not converting to greyscale, setting channels=3')
+        channels = 3
 
     # these args are automatically logged
     lightning_model = define_model.ZoobotTree(
@@ -325,8 +310,7 @@ def train_default_zoobot_from_scratch(
     if sync_batchnorm:
         logging.info('Using sync batchnorm')
         lightning_model = TorchSyncBatchNorm().apply(lightning_model)
-    
-    
+
 
     # used later for checkpoint_callback.best_model_path
     checkpoint_callback, callbacks = get_default_callbacks(save_dir, patience, checkpoint_file_template, auto_insert_metric_name, save_top_k)
@@ -386,7 +370,14 @@ def train_default_zoobot_from_scratch(
             logging.info(f'id_str: {len(id_strs)}, preds: {len(predictions)})')
             logging.info(predictions[0])
             logging.info(id_strs[0])
-            save_predictions.predictions_to_csv(predictions, id_strs, schema.label_cols, save_loc=save_dir + f'/test_predictions+_{torch.distributed.get_rank()}.csv')
+
+            try:
+                rank = torch.distributed.get_rank()
+            except RuntimeError:  # maybe not in distributed mode
+                rank = 0
+                logging.warning('No distributed rank found, using 0')
+
+            save_predictions.predictions_to_csv(predictions, id_strs, schema.label_cols, save_loc=save_dir + f'/test_predictions+_{rank}.csv')
         else:
             logging.info(f'Not a webdatamodule, skipping predictions, {datamodule.__class__}')
         
