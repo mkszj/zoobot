@@ -728,7 +728,7 @@ def cross_entropy_loss(y_pred: torch.Tensor, y: torch.Tensor, label_smoothing: f
         torch.Tensor: unreduced cross-entropy loss
     """
     # added .to(y) to ensure weights are on same device, bit of a hack but self.register_buffer() doesn't work as I expected
-    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y), reduction='none')  
+    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y) if weight is not None else None, reduction='none')  
 
 
 def mse_loss(y_pred, y):
