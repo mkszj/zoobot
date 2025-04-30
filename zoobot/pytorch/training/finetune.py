@@ -728,7 +728,7 @@ def cross_entropy_loss(y_pred: torch.Tensor, y: torch.Tensor, label_smoothing: f
         torch.Tensor: unreduced cross-entropy loss
     """
     # added .to(y) to ensure weights are on same device, bit of a hack but self.register_buffer() doesn't work as I expected
-    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y), reduction='none')  
+    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y) if weight is not None else None, reduction='none')  
 
 
 def mse_loss(y_pred, y):
@@ -790,7 +790,14 @@ def load_pretrained_zoobot(checkpoint_loc: str) -> torch.nn.Module:
     else:
         # necessary to load gpu-trained model on cpu
         map_location = torch.device('cpu')
-    return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
+
+    # changed
+    try:
+        logging.info('Attempting to load ZoobotTree from checkpoint')
+        return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
+    except TypeError:
+        logging.info('Attempting to load FinetuneableZoobotTree from checkpoint')
+        return FinetuneableZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
     
 
 def get_trainer(
