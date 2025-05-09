@@ -223,7 +223,18 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
             tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
         else:
             raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
-            
+               
+        # new
+        # interpret -1 as all blocks
+        if self.n_blocks == -1:
+            logging.info('n_blocks is -1, finetuning all blocks')
+            self.n_blocks = len(tuneable_blocks)
+
+        assert self.n_blocks <= len(
+            tuneable_blocks
+        ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
+
+
         assert self.n_blocks <= len(
             tuneable_blocks
         ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
