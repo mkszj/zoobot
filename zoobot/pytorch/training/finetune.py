@@ -221,6 +221,9 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         elif isinstance(self.encoder, timm.models.ConvNeXt):  # stem + 4 blocks, for all sizes
             # https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/convnext.py#L264
             tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
+        # new
+        elif isinstance(self.encoder, timm.models.VisionTransformer):
+            tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
         else:
             raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
                
