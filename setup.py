@@ -44,19 +44,17 @@ setuptools.setup(
             'torchvision',
             'torchaudio',
             'torchmetrics',
-            'lightning >= 2.2.5',
+            'pytorch_lightning >= 2.2.5',
             'pyro-ppl >= 1.8.6',
             'timm >= 1.0.15'
         ],
 
         'pytorch-colab': [
-            # colab includes pytorch already
-            'lightning >= 2.2.5',
-            'torchmetrics',
-            'pyro-ppl>=1.8.6',
-            'timm >= 1.0.15'
+            # colab includes everything else pytorch-y already
+            # (and reinstalling it will cause problems)
+            'pyro-ppl>=1.8.6'
         ],
-        
+
         # TODO may add narval/Digital Research Canada config
 
         'utilities': [
