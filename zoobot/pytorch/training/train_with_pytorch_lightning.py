@@ -25,10 +25,10 @@ def train_default_zoobot_from_scratch(
     save_dir: str,  # save model here
     schema: Schema,  # answer these questions
     # augmentation parameters are required, see github/mwalmsley/galaxy-datasets
-    # specify either one transform_cfg for both train and inference, or two separate ones
-    transform_cfg: None,
-    train_transform_cfg: None,
-    inference_transform_cfg: None,
+    # specify either one transform_cfg for both train and test/inference, or two separate ones
+    transform_cfg=None,
+    train_transform_cfg=None,
+    inference_transform_cfg=None,
     # input data - specify *either* catalog (to be split) or the splits themselves
     catalog=None,
     train_catalog=None,
@@ -147,6 +147,11 @@ def train_default_zoobot_from_scratch(
     logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
     logging.info(f'Using inference_transform_cfg: {inference_transform_cfg}')
 
+    # same transforms regardless of images or webdataset
+    # GalaxyViewTransform is my custom class for making transforms, and includes .transform to get the T.Compose object
+    train_transform = transforms.GalaxyViewTransform(train_transform_cfg).transform
+    inference_transform = transforms.GalaxyViewTransform(inference_transform_cfg).transform
+
     strategy = 'auto'
     plugins = None
     if (gpus is not None) and (gpus > 1):
@@ -244,7 +249,7 @@ def train_default_zoobot_from_scratch(
             # can take either a catalog (and split it), or a pre-split catalog
             **data_to_use,
             # augmentations parameters, now using torchvision
-            custom_torchvision_transform=(train_transform_cfg, inference_transform_cfg),
+            requested_transform=(train_transform, inference_transform),
             # hardware parameters
             batch_size=batch_size, # on 2xA100s, 256 with DDP, 512 with distributed (i.e. split batch)
             num_workers=num_workers,
@@ -253,7 +258,7 @@ def train_default_zoobot_from_scratch(
     else:
         assert webdatasets  # train_urls is not None
         # this branch will use WebDataModule to load premade webdatasets
-        # uses new torchvision transforms         
+        # will use new torchvision transforms         
 
         datamodule = WebDataModule(
             train_urls=train_urls,
@@ -266,10 +271,8 @@ def train_default_zoobot_from_scratch(
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
             cache_dir=cache_dir,
-            # augmentation args REMOVED
-            # uses new torchvision transforms
-            train_transform=transforms.GalaxyViewTransform(train_transform_cfg),
-            inference_transform=transforms.GalaxyViewTransform(inference_transform_cfg),
+            train_transform=train_transform,
+            inference_transform=inference_transform
         )
 
     # debug - check range of loaded images, should be 0-1
