@@ -116,7 +116,29 @@ def prediction_hdf5_to_summary_parquet(hdf5_loc: str, save_loc: str, schema: sch
     logging.info('Concentrations: {}'.format(concentrations.shape))
 
     # supports (galaxy, question, distribution...) shape, no TF needed
+    return concentrations_to_summary_parquet(save_loc, schema, galaxy_id_df, concentrations, label_cols)
+
+def prediction_csv_to_summary_parquet(prediction_df: str, save_loc: str, schema: schemas.Schema):
+    """
+    Take .csv file with galaxy ids and concentrations predicted by Zoobot
+    Create data-release-style .parquet catalogs with vote fractions and uncertainties
+    Saves two tables: 
+        'friendly', with just vote fracs and nans where answers aren't relevent
+        'advanced', with all vote fractions and 90% confidence intervals on those fractions
+    
+    Args:
+        prediction_df (str): _description_
+        save_loc (str): _description_
+    """
+    concentrations = prediction_df[schema.label_cols].values  # one value per galaxy, per answer
+
+    label_cols = schema.label_cols
+    return concentrations_to_summary_parquet(save_loc, schema, prediction_df, concentrations, label_cols)
+
+def concentrations_to_summary_parquet(save_loc, schema, galaxy_id_df, concentrations, label_cols):
     unmasked_fractions = stats.expected_value_of_dirichlet_mixture(concentrations, schema)
+
+    logging.info('Concentrations: {}'.format(concentrations.shape))
 
     prob_of_asked = []
     for question in schema.questions:
@@ -171,7 +193,10 @@ def prediction_hdf5_to_summary_parquet(hdf5_loc: str, save_loc: str, schema: sch
     friendly_df = pd.concat([galaxy_id_df, fraction_df], axis=1)
     friendly_df = convert_halfprecision_cols(friendly_df)
     friendly_df.to_parquet(friendly_loc, index=False)
-    logging.info('Friendly summary table saved to {}'.format(friendly_loc))
+    logging.info('Friendly summary table PARQUET saved to {}'.format(friendly_loc))
+    # also save a csv to help users
+    friendly_df.to_csv(friendly_loc.replace('.parquet', '.csv'), index=False)
+    logging.info('Friendly summary table CSV saved to {}'.format(friendly_loc))
 
     # make advanced dataframe with unmasked fractions, error bars, proportion_asked
     advanced_loc = save_loc.replace('.parquet', '_advanced.parquet')
@@ -183,6 +208,8 @@ def prediction_hdf5_to_summary_parquet(hdf5_loc: str, save_loc: str, schema: sch
     advanced_df = convert_halfprecision_cols(advanced_df)
     advanced_df.to_parquet(advanced_loc, index=False)
     logging.info('Advanced summary table saved to {}'.format(advanced_loc))
+
+    return friendly_df, advanced_df
 
 
 def convert_halfprecision_cols(df):

@@ -237,12 +237,22 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         elif isinstance(self.encoder, timm.models.ConvNeXt):  # stem + 4 blocks, for all sizes
             # https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/convnext.py#L264
             tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
+
+        # new
         elif isinstance(self.encoder, timm.models.VisionTransformer):
-            tuneable_blocks = [self.encoder.patch_embed] + [block for block in self.encoder.blocks]
+            tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
         else:
-            raise ValueError(
-                f"Encoder architecture not automatically recognised: {type(self.encoder)}"
-            )
+            raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
+               
+        # new
+        # interpret -1 as all blocks
+        if self.n_blocks == -1:
+            logging.info('n_blocks is -1, finetuning all blocks')
+            self.n_blocks = len(tuneable_blocks)
+
+        assert self.n_blocks <= len(
+            tuneable_blocks
+        ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
 
         assert self.n_blocks <= len(
             tuneable_blocks
@@ -455,12 +465,21 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             dropout_prob=self.dropout_prob,
         )
         self.label_smoothing = label_smoothing
-        self.loss = partial(
-            cross_entropy_loss,
-            weight=class_weights,
-            label_smoothing=self.label_smoothing,
-        )
-        logging.info(f"num_classes: {num_classes}")
+
+        # if isinstance(class_weights, list) or isinstance(class_weights, np.ndarray):
+        if class_weights is not None:
+            # https://lightning.ai/docs/pytorch/stable/accelerators/accelerator_prepare.html#init-tensors-using-tensor-to-and-register-buffer
+            self.register_buffer("class_weights", torch.Tensor(class_weights))
+            print(self.class_weights, self.class_weights.device)
+            # can now use self.class_weights in forward pass and will be on correct device (because treated as model parameters)
+        else:
+            self.class_weights = None
+
+        self.loss = partial(cross_entropy_loss,
+                            weight=self.class_weights,
+                            label_smoothing=self.label_smoothing)
+        logging.info(f'num_classes: {num_classes}')
+
         if num_classes == 2:
             logging.info("Using binary classification")
             task = "binary"
@@ -774,13 +793,10 @@ def cross_entropy_loss(
     Returns:
         torch.Tensor: unreduced cross-entropy loss
     """
-    return F.cross_entropy(
-        y_pred,
-        y.long(),
-        label_smoothing=label_smoothing,
-        weight=weight,
-        reduction="none",
-    )
+
+    # added .to(y) to ensure weights are on same device, bit of a hack but self.register_buffer() doesn't work as I expected
+    # should be true automatically anyway if passing in self.weights above
+    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y) if weight is not None else None, reduction='none')  
 
 
 def mse_loss(y_pred, y):
@@ -843,8 +859,15 @@ def load_pretrained_zoobot(checkpoint_loc: str) -> torch.nn.Module:
         map_location = None
     else:
         # necessary to load gpu-trained model on cpu
-        map_location = torch.device("cpu")
-    return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder  # type: ignore
+        map_location = torch.device('cpu')
+
+    # changed
+    try:
+        logging.info('Attempting to load ZoobotTree from checkpoint')
+        return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
+    except TypeError:
+        logging.info('Attempting to load FinetuneableZoobotTree from checkpoint')
+        return FinetuneableZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
 
 
 def get_trainer(
