@@ -31,7 +31,7 @@ setuptools.setup(
             'torchmetrics',
             'lightning >= 2.2.5',
             # 'simplejpeg',
-            'albumentations',
+            'albumentations < 2.0.0',
             'pyro-ppl >= 1.8.6',
             'timm == 0.9.10'
         ],
@@ -76,8 +76,7 @@ setuptools.setup(
             'albumentations',
             'pyro-ppl>=1.8.0',
             'torchmetrics==0.14.0',
-            'timm >= 0.9.10',
-            'galaxy_datasets == 0.0.17'
+            'timm >= 0.9.10'
         ],
         # TODO may add narval/Digital Research Canada config
         'tensorflow': [ # WARNING now deprecated
@@ -117,6 +116,6 @@ setuptools.setup(
         'webdataset',  # for reading webdataset files
         'huggingface_hub',  # login may be required
         'setuptools',  # no longer pinned
-        'galaxy-datasets>=0.0.18'  # for dataset loading in both TF and Torch (see github/mwalmsley/galaxy-datasets)
+        'galaxy-datasets>=0.0.22'  # for dataset loading in both TF and Torch (see github/mwalmsley/galaxy-datasets)
     ]
 )
