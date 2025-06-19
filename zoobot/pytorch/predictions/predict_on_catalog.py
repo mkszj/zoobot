@@ -1,17 +1,18 @@
 import logging
 import time
 import datetime
-from typing import List
+from typing import List, Union
 
 import pandas as pd
 import torch
+import torchvision
 import pytorch_lightning as pl
 
 from zoobot.shared import save_predictions
 from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
 
 
-def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, label_cols: List, save_loc: str, datamodule_kwargs={}, trainer_kwargs={}) -> None:
+def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, label_cols: Union[List, None], save_loc: str, inference_transform: torchvision.transforms.Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
@@ -30,9 +31,8 @@ def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, la
     predict_datamodule = GalaxyDataModule(
         label_cols=None,  # not using label_cols to load labels, we're only using it to name our predictions
         predict_catalog=catalog,  # no need to specify the other catalogs
-        # will use the default transforms unless overridden with datamodule_kwargs
-        # 
-        **datamodule_kwargs  # e.g. batch_size, resize_size, crop_scale_bounds, etc.
+        requested_transform=inference_transform,  # see galaxy-datasets, e.g. torchvision.transforms.Compose([torchvision.transforms.Resize((224, 224)), torchvision.transforms.ToTensor()])
+        **datamodule_kwargs  # e.g. batch_size, num_workers, etc
     )
     # with this stage arg, will only use predict_catalog 
     # crucial to specify the stage, or will error (as missing other catalogs)
