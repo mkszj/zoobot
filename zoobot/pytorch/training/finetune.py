@@ -286,6 +286,8 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         opt = torch.optim.AdamW(params, weight_decay=self.weight_decay)  # lr included in params dict
         logging.info('Optimizer ready, configuring scheduler')
 
+        # TODO add OneCycleLR
+
         if self.cosine_schedule:
             logging.info('Using lightly cosine schedule, warmup for {} epochs, max for {} epochs'.format(self.warmup_epochs, self.max_cosine_epochs))
             # from lightly.utils.scheduler import CosineWarmupScheduler  #copied from here to avoid dependency
@@ -331,10 +333,13 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
 
     def run_step_through_model(self, batch):
       # part of training/val/test for all subclasses
-        x, y = batch
+        x, y = self.batch_to_supervised_tuple(batch)
         y_pred = self.forward(x)
         loss = self.loss(y_pred, y)  # must be subclasses and specified
         return y, y_pred, loss
+    
+    def batch_to_supervised_tuple(self, batch):
+        raise NotImplementedError('Must be subclassed to convert batch to supervised tuple (x, y)')
 
     def step_to_dict(self, y, y_pred, loss):
         return {'loss': loss.mean(), 'predictions': y_pred, 'labels': y}
@@ -433,9 +438,12 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             num_classes: int,
             label_smoothing=0.,
             class_weights=None,
+            label_col:str='label',
             **super_kwargs) -> None:
 
         super().__init__(**super_kwargs)
+
+        self.label_col = label_col
 
         logging.info('Using classification head and cross-entropy loss')
         self.head = LinearHead(
@@ -471,6 +479,11 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
     def step_to_dict(self, y, y_pred, loss):
         y_class_preds = torch.argmax(y_pred, axis=1) # type: ignore
         return {'loss': loss.mean(), 'predictions': y_pred, 'labels': y, 'class_predictions': y_class_preds}
+    
+
+    def batch_to_supervised_tuple(self, batch):
+        return batch['image'], batch[self.label_col]
+        
 
     def on_train_batch_end(self, step_output, *args):
         super().on_train_batch_end(step_output, *args)
@@ -556,9 +569,12 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
             self,
             loss:str='mse',
             unit_interval:bool=False, 
+            label_col:str='label',
             **super_kwargs) -> None:
 
         super().__init__(**super_kwargs)
+
+        self.label_col = label_col  # TODO could add MultipleLabelRegressor, Nasser working on this
 
         self.unit_interval = unit_interval
         if self.unit_interval:
@@ -585,9 +601,12 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
         self.train_rmse = tm.MeanSquaredError(squared=False)
         self.val_rmse = tm.MeanSquaredError(squared=False)
         self.test_rmse = tm.MeanSquaredError(squared=False)
-        
+
     def step_to_dict(self, y, y_pred, loss):
         return {'loss': loss.mean(), 'predictions': y_pred, 'labels': y}
+    
+    def batch_to_supervised_tuple(self, batch):
+        return batch['image'], batch[self.label_col]
 
     def on_train_batch_end(self, step_output, *args):
         super().on_train_batch_end(step_output, *args)
