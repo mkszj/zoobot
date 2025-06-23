@@ -374,13 +374,10 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         return self.make_step(batch)
 
-    def predict_step(self, batch, batch_idx) -> Any:
-        # I can't work out how to get webdataset to return a single item im, not a tuple (im,).
-        # this is fine for training but annoying for predict
-        # help welcome. meanwhile, this works around it
-        if isinstance(batch, list) and len(batch) == 1:
-            return self(batch[0])
-        return self(batch)
+    def predict_step(self, x: torch.Tensor, batch_idx):
+        return self.forward(x['image'])
+        # forward = self(batch)
+        # and convert to nice pandas dataframe using self.label_col, self.schema, etc
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int, dataloader_idx=0):
         # v2 docs currently do not show dataloader_idx as train argument so unclear if this will value be updated properly
@@ -512,11 +509,8 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             "class_predictions": y_class_preds,
         }
 
-    
-
     def batch_to_supervised_tuple(self, batch):
         return batch['image'], batch[self.label_col]
-        
 
     def on_train_batch_end(self, step_output, *args):
         super().on_train_batch_end(step_output, *args)
@@ -555,11 +549,9 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
         )
 
     def predict_step(self, x: Union[list[torch.Tensor], torch.Tensor], batch_idx):
-        # see Abstract version
-        if isinstance(x, list) and len(x) == 1:
-            return self(x[0])
-        x = self.forward(x)  # type: ignore # logits from LinearHead
-        # then applies softmax
+        # overrides abstract version
+        x = self.forward(x['image'])  # type: ignore # logits from LinearHead
+        # then applies softmax. Only in predict step because we prefer logits for gradient stability during training
         return F.softmax(x, dim=1)
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):
@@ -707,11 +699,8 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
             prog_bar=self.prog_bar,
         )
 
-    def predict_step(self, x: Union[list[torch.Tensor], torch.Tensor], batch_idx):
-        # see Abstract version
-        if isinstance(x, list) and len(x) == 1:
-            return self(x[0])
-        return self.forward(x)
+    def predict_step(self, x: torch.Tensor, batch_idx):
+        return self.forward(x['image'])
 
 
 class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
@@ -753,6 +742,16 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
         )
 
         self.loss = define_model.get_dirichlet_loss_func(self.schema.question_index_groups)
+
+    def batch_to_supervised_tuple(self, batch):
+        """
+        Converts a batch to a supervised tuple (x, y) for training.
+        x is the image, y is the counts of votes for each answer in the schema.
+        """
+        x = batch['image']
+        # y is a dict with keys as label_cols and values as counts
+        y = torch.stack([batch[label_col] for label_col in self.schema.label_cols], dim=1)
+        return x, y
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):
         raise NotImplementedError
