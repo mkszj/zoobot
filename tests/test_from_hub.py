@@ -3,6 +3,7 @@ import pytest
 import timm
 import torch
 
+# when testing at dunlap desktop, hf_cache env variable is set to use ssd, so turn on external storage first
 
 def test_get_encoder():
     model = timm.create_model("hf_hub:mwalmsley/zoobot-encoder-efficientnet_b0", pretrained=True)
