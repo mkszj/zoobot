@@ -105,7 +105,8 @@ class GenericLightningModule(pl.LightningModule):
         return self.head(x)
 
     def make_step(self, batch, step_name):
-        x, labels = batch
+        x = batch['image']
+        labels = {key: batch[key] for key in self.schema.label_cols}  # expand label cols to dict
         predictions = self(x)  # by default, these are Dirichlet concentrations
         loss = self.calculate_loss_and_update_loss_metrics(
             predictions, labels, step_name
@@ -271,8 +272,6 @@ class ZoobotTree(GenericLightningModule):
         # assert question_index_groups is None,  "Don't pass both question_index_groups and question_answer_pairs/dependencies"
         assert dependencies is not None
         self.schema = schemas.Schema(question_answer_pairs, dependencies)
-        # replace with schema-derived version
-        question_index_groups = self.schema.question_index_groups
 
         self.setup_metrics()
 
@@ -306,13 +305,15 @@ class ZoobotTree(GenericLightningModule):
             dropout_rate=dropout_rate,
         )
 
-        self.loss_func = get_dirichlet_loss_func(question_index_groups)
+        # callable that expects (inputs, targets, and optional sum_over_questions)
+        self.loss_func = get_dirichlet_loss_func(question_answer_pairs)
 
         logging.info("Zoobot __init__ complete")
 
     def calculate_loss_and_update_loss_metrics(self, predictions, labels, step_name):
-        # self.loss_func returns shape of (galaxy, question), mean to ()
-        multiq_loss = self.loss_func(predictions, labels, sum_over_questions=False)
+        # at first, no reduction
+        multiq_loss = self.loss_func(predictions, labels)  # shape (batch, num_questions)
+        # save metrics before summing over questions
         self.update_per_question_loss_metric(multiq_loss, step_name=step_name)
         # sum over questions and take a per-device mean
         # for DDP strategy, batch size is constant (batches are not divided, data pool is divided)
@@ -414,27 +415,15 @@ class ZoobotTree(GenericLightningModule):
     #         self.log(f'{step_name}/questions/question_{question_n}_loss:0', torch.mean(multiq_loss[:, question_n]), on_epoch=True, on_step=False, sync_dist=True)
 
 
-def get_dirichlet_loss_func(question_index_groups):
-    # This just adds schema.question_index_groups as an arg to the usual (labels, preds) loss arg format
-    # Would use lambda but multi-gpu doesn't support as lambda can't be pickled
-    return partial(dirichlet_loss, question_index_groups=question_index_groups)
+def get_dirichlet_loss_func(question_answer_pairs: dict):
+    return losses.CustomMultiQuestionLoss(
+        question_answer_pairs=question_answer_pairs,
+        question_functional_loss=losses.get_dirichlet_neg_log_prob, 
+        careful=False,
+        sum_over_questions=False
+    ).forward # expects (inputs, targets)
 
-    # accept (labels, preds), return losses of shape (batch, question)
 
-
-def dirichlet_loss(preds, labels, question_index_groups, sum_over_questions=False):
-    # pytorch convention is preds, labels for loss func
-    # my and sklearn convention is labels, preds for loss func
-
-    # multiquestion_loss returns loss of shape (batch, question)
-    # torch.sum(multiquestion_loss, axis=1) gives loss of shape (batch). Equiv. to non-log product of question likelihoods.
-    multiq_loss = losses.calculate_multiquestion_loss(
-        labels, preds, question_index_groups, careful=True
-    )
-    if sum_over_questions:
-        return torch.sum(multiq_loss, axis=1)
-    else:
-        return multiq_loss
 
 
 # input_size doesn't matter as long as it's large enough to not be pooled to zero

@@ -4,7 +4,7 @@ import os
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 from galaxy_datasets.shared.demo_gz_candels import demo_gz_candels
 
 from zoobot.pytorch.training import finetune
@@ -57,15 +57,12 @@ if __name__ == '__main__':
 
     train_catalog, val_catalog = train_test_split(train_and_val_catalog, test_size=0.3)
 
-    resize_after_crop = 224  # must match how checkpoint below was trained
-    datamodule = GalaxyDataModule(
+    datamodule = CatalogDataModule(
         label_cols=schema.label_cols,
         train_catalog=train_catalog,
         val_catalog=val_catalog,
         test_catalog=test_catalog,
-        batch_size=batch_size,
-        # uses default_augs
-        resize_after_crop=resize_after_crop  
+        batch_size=batch_size
     )
 
     model = finetune.FinetuneableZoobotTree(

@@ -19,7 +19,7 @@ def train_catalog(tmp_path):
     return train_catalog
 
 
-def test_train_rings(tmp_path, schema, train_catalog):
+def test_train_candels(tmp_path, schema, train_catalog):
 
     save_dir = tmp_path / "save_dir"
     save_dir.mkdir()

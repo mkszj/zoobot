@@ -3,7 +3,7 @@ import os
 
 from zoobot.pytorch.training import finetune
 from galaxy_datasets import demo_rings
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
 if __name__ == '__main__':
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     # save the finetuning results here
     save_dir = os.path.join(zoobot_dir, 'results/pytorch/finetune/finetune_binary_classification')
 
-    datamodule = GalaxyDataModule(
+    datamodule = CatalogDataModule(
       label_cols=label_cols,
       catalog=train_catalog,  # very small, as a demo
       batch_size=32
@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     import pytorch_lightning as pl
     predict_trainer = pl.Trainer(devices=1, max_epochs=-1)
-    predict_datamodule = GalaxyDataModule(
+    predict_datamodule = CatalogDataModule(
       label_cols=None,  # important, else you will get "conv2d() received an invalid combination of arguments"
       predict_catalog=test_catalog,
       batch_size=32

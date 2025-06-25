@@ -55,13 +55,13 @@ Let's say you want to find ringed galaxies and you have a small labelled dataset
 
 ```python
 import pandas as pd
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 from zoobot.pytorch.training import finetune
 
 # csv with 'ring' column (0 or 1) and 'file_loc' column (path to image)
 labelled_df = pd.read_csv('/your/path/some_labelled_galaxies.csv')
 
-datamodule = GalaxyDataModule(
+datamodule = CatalogDataModule(
     label_cols=['ring'],
     catalog=labelled_df,
     batch_size=32

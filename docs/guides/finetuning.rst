@@ -88,11 +88,11 @@ This downloads the demo rings dataset. ``train_catalog`` is a table of galaxies 
 - ``file_loc``, a path to the image (jpg, png, or fits) containing the galaxy
 - ``ring``, the label (either 0 or 1)
 
-Then we can use ``GalaxyDataModule`` to tell PyTorch to load the images and labels in this catalog:
+Then we can use ``CatalogDataModule`` to tell PyTorch to load the images and labels in this catalog:
 
 .. code-block:: python
 
-    datamodule = GalaxyDataModule(
+    datamodule = CatalogDataModule(
       label_cols=['ring'],
       catalog=train_catalog,
       batch_size=32
@@ -106,7 +106,8 @@ Here, there's only one label column, but it should still be a list.
 If your computer throws out-of-memory errors, you may need to reduce this.
 If training is very slow, you can increase this.
 
-``GalaxyDataModule`` has many other options for specifying how to transform the images before passing them to the network ("augmentations")
+``CatalogDataModule`` will, by default, transform the images before passing them to the network ("augmentations").
+You can choose any augmentations: specify them with the ```requested_transform`` argument. Use a tuple for (train, test) transforms. Any ``T.Compose`` object is supported.
 See the `code <https://github.com/mwalmsley/galaxy-datasets/blob/main/galaxy_datasets/pytorch/galaxy_datamodule.py#L18>`__ (in another repo).
 
 

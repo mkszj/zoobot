@@ -9,7 +9,7 @@ import torchvision
 import pytorch_lightning as pl
 
 from zoobot.shared import save_predictions
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
 def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, label_cols: Union[List, None], save_loc: str, inference_transform: torchvision.transforms.Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
@@ -22,13 +22,13 @@ def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, la
         n_samples (int): num. of forward passes to make per galaxy. Useful to marginalise over augmentations/test-time dropout.
         label_cols (List): Names for prediction columns. Only for your convenience - has no effect on predictions.
         save_loc (str): desired name of file recording the predictions
-        datamodule_kwargs (dict, optional): Passed to GalaxyDataModule. Use to e.g. add custom augmentations. Defaults to {}.
+        datamodule_kwargs (dict, optional): Passed to CatalogDataModule. Use to e.g. add custom augmentations. Defaults to {}.
         trainer_kwargs (dict, optional): Passed to pl.Trainer. Defaults to {}.
     """
 
     image_id_strs = list(catalog['id_str'].astype(str))
 
-    predict_datamodule = GalaxyDataModule(
+    predict_datamodule = CatalogDataModule(
         label_cols=None,  # not using label_cols to load labels, we're only using it to name our predictions
         predict_catalog=catalog,  # no need to specify the other catalogs
         requested_transform=inference_transform,  # see galaxy-datasets, e.g. torchvision.transforms.Compose([torchvision.transforms.Resize((224, 224)), torchvision.transforms.ToTensor()])
@@ -64,25 +64,22 @@ def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, la
     # trainer.predict gives list of tensors, each tensor being predictions for a batch. Concat on axis 0.
     # range(n_samples) list comprehension repeats this, for dropout-permuted predictions. Stack to create new last axis.
     # final shape (n_galaxies, n_answers, n_samples)
-    predictions = torch.stack(
-        [   
-            # trainer.predict gives [(galaxy, answer), ...] list, batchwise
-            # concat batches
-            torch.concat(trainer.predict(model, predict_datamodule), dim=0)
-            for n in range(n_samples)
-        ], 
-        dim=-1).numpy()  # now stack on final dim for (galaxy, answer, dropout) shape
+    predictions: pd.DataFrame = pd.concat(trainer.predict(model, predict_datamodule), axis=0)  # in latest version, now a dataframe
+
     logging.info('Predictions complete - {}'.format(predictions.shape))
 
     logging.info(f'Saving predictions to {save_loc}')
 
-    if save_loc.endswith('.csv'):      # save as pandas df
-        save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
-    elif save_loc.endswith('.hdf5'):
-        save_predictions.predictions_to_hdf5(predictions, image_id_strs, label_cols, save_loc)
-    else:
-        logging.warning('Save format of {} not recognised - assuming csv'.format(save_loc))
-        save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
+    predictions.to_csv(save_loc, index=False)  # RegressionBaseline returns pandas dataframe, do I want this, or hdf5?
+    # probably just dataframe, since I only load to dataframe next anyway, and I never used repeated draws
+
+    # if save_loc.endswith('.csv'):      # save as pandas df
+    #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
+    # elif save_loc.endswith('.hdf5'):
+    #     save_predictions.predictions_to_hdf5(predictions, image_id_strs, label_cols, save_loc)
+    # else:
+    #     logging.warning('Save format of {} not recognised - assuming csv'.format(save_loc))
+    #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
 
     logging.info(f'Predictions saved to {save_loc}')
 
