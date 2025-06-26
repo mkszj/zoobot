@@ -78,19 +78,41 @@ def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q):
     Returns:
         torch.Tensor: negative log. prob per galaxy, of shape (batch_dim).
     """
-    # if you get a dimension mismatch here like [16, 2] vs. [64, 2], for example, check --shard-img-size is correct in train_model.py.
-    # images may be being reshaped to the wrong expected size e.g. if they are saved as 32x32, but you put --shard-img-size=64,
-    # you will get image batches of shape [N/4, 64, 64, 1] and hence have the wrong number of images vs. labels (and meaningless images)
-    # so check --shard-img-size carefully!
-    total_count = torch.sum(labels_for_q, axis=1)
+    # total_count = torch.sum(labels_for_q, axis=1)
+    
+    # fails with
+    # ValueError: (tensor(0, device='cuda:0'), tensor([63.6014, 57.0941, 32.3332], device='cuda:0'), tensor([0, 0, 0], device='cuda:0', dtype=torch.int32))
+    # works with
+    # ValueError: (tensor(39), tensor([49.8713, 52.1925, 52.4133], grad_fn=<SelectBackward0>), tensor([21,  2, 16], dtype=torch.int32))
 
+    # raise ValueError(total_count[0], concentrations_for_q[0], labels_for_q[0])  # debug
+
+    # raise ValueError(total_count.shape, concentrations_for_q.shape, labels_for_q.shape)
+    # works with (torch.Size([32]), torch.Size([32, 3]), torch.Size([32, 3])) via zoobot tests
+    # fails with (torch.Size([64]), torch.Size([64, 3]), torch.Size([64, 3])) via foundation?
+    # ValueError: shape mismatch: objects cannot be broadcast to a single shape: torch.Size([64, 3]) vs torch.Size([64])
     # https://docs.pyro.ai/en/stable/distributions.html#dirichletmultinomial
     # .int()s avoid rounding errors causing loss of around 1e-5 for questions with 0 votes
-    dist = pyro.distributions.DirichletMultinomial(
-        total_count=total_count.int(), 
-        concentration=concentrations_for_q, 
-        is_sparse=False, validate_args=True
-    )
-    dirichlet_neg_log_prob = -dist.log_prob(labels_for_q.int())  # important minus sign
+    # dist = pyro.distributions.DirichletMultinomial(
+    #     total_count=total_count.int(), 
+    #     concentration=concentrations_for_q, 
+    #     is_sparse=False, validate_args=True
+    # )
+
+    # dirichlet_neg_log_prob = -dist.log_prob(labels_for_q.int())  # important minus sign
+
+    # print(f"concentrations_for_q: {concentrations_for_q.shape}, labels_for_q: {labels_for_q.shape}")
+
+
+    # manual equivalent, removes pyro dependency
+    dirichlet_neg_log_prob = -log_prob(concentrations_for_q, labels_for_q.int())
 
     return dirichlet_neg_log_prob  # shape (batch_dim,)
+
+# https://docs.pyro.ai/en/stable/_modules/pyro/distributions/conjugate.html#DirichletMultinomial
+
+def log_prob(alpha, value):
+    return _log_beta_1(alpha.sum(-1), value.sum(-1)) - _log_beta_1(alpha, value).sum(-1)
+
+def _log_beta_1(alpha, value):
+    return torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
