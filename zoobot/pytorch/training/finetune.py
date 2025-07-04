@@ -932,7 +932,7 @@ def get_trainer(
         logger (pl.loggers.wandb_logger, optional): If pl.loggers.wandb_logger, track experiment on Weights and Biases. Defaults to None.
 
     Returns:
-        pl.Trainer: PyTorch Lightning trainer object for finetuning a model on a GalaxyDataModule.
+        pl.Trainer: PyTorch Lightning trainer object for finetuning a model on a CatalogDataModule.
     """
 
     checkpoint_callback = ModelCheckpoint(
