@@ -458,6 +458,7 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             label_smoothing=0.,
             class_weights=None,
             label_col:str='label',
+            run_linear_sanity_check: bool = False,
             **super_kwargs) -> None:
 
         super().__init__(**super_kwargs)
