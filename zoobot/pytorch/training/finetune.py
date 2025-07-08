@@ -742,7 +742,7 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
             dropout_rate=self.dropout_prob,
         )
 
-        self.loss = define_model.get_dirichlet_loss_func(self.schema.question_index_groups)
+        self.loss = define_model.get_dirichlet_loss_func(self.schema.question_answer_pairs)
 
     def batch_to_supervised_tuple(self, batch):
         """

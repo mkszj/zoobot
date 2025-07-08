@@ -6,7 +6,7 @@ import pyro
 
 
 class CustomMultiQuestionLoss(torch.nn.Module):
-    def __init__(self, question_answer_pairs, question_functional_loss, careful=False, sum_over_questions=False):
+    def __init__(self, question_answer_pairs: dict, question_functional_loss, careful=False, sum_over_questions=False):
         super().__init__()
         self.question_answer_pairs = question_answer_pairs
         self.question_functional_loss = question_functional_loss
