@@ -751,7 +751,10 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
         """
         x = batch['image']
         # y is a dict with keys as label_cols and values as counts
-        y = torch.stack([batch[label_col] for label_col in self.schema.label_cols], dim=1)
+        y = dict([(label_col, batch[label_col]) for label_col in self.schema.label_cols])
+
+        # old version, tensor of shape (batch, answers)
+        # y = torch.stack([batch[label_col] for label_col in self.schema.label_cols], dim=1)
         return x, y
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):

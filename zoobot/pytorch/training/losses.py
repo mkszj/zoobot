@@ -19,7 +19,7 @@ class CustomMultiQuestionLoss(torch.nn.Module):
         self.sum_over_questions = sum_over_questions
 
 
-    def forward(self, inputs, targets):
+    def forward(self, inputs: torch.Tensor, targets: dict) -> torch.Tensor:
         # inputs, prediction vector, is B x N, where N is the number of answer keys (fractions). Might change to dictlike.
         # targets, labels from datamodule, is dictlike with keys of answer_keys, each with values of shape (B)
 
