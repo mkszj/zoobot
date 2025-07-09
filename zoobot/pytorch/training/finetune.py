@@ -241,6 +241,11 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         # new
         elif isinstance(self.encoder, timm.models.VisionTransformer):
             tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
+
+        elif hasattr(self.encoder, 'vit'):  # e.g. mae
+            logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
+            tuneable_blocks = [self.encoder.vit.patch_embed] + [stage for stage in self.encoder.vit.blocks]
+        
         else:
             raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
                
