@@ -99,7 +99,7 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         # debugging utils
         prog_bar=True,
         visualize_images=False,  # upload examples to wandb, good for debugging
-        n_layers=0, # deprecated (no effect) but can't remove yet as is an arg in some saved checkpoints
+        n_layers=None, # deprecated (no effect) but can't remove yet as is an arg in some saved checkpoints
         seed=42,
     ):
         super().__init__()
