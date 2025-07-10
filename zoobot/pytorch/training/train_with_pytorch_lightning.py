@@ -3,7 +3,7 @@ import os
 from typing import Tuple
 
 import torch
-import pytorch_lightning as pl
+import lightning as L
 from lightning.pytorch.plugins import TorchSyncBatchNorm
 from lightning.pytorch.strategies.ddp import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -440,7 +440,7 @@ def slurm_debugging_logs():
     logging.info(os.getenv("SLURM_JOB_ID", 'No SLURM_JOB_ID'))
     logging.info(os.getenv("SLURM_JOB_NAME", 'No SLURM_JOB_NAME'))
     logging.info(os.getenv("SLURM_NTASKS", 'No SLURM_NTASKS'))
-    # https://github.com/PyTorchLightning/pytorch-lightning/blob/d5fa02e7985c3920e72e268ece1366a1de96281b/pytorch_lightning/trainer/connectors/slurm_connector.py#L29
+    # https://github.com/PyTorchLightning/pytorch-lightning/blob/d5fa02e7985c3920e72e268ece1366a1de96281b/lightning/trainer/connectors/slurm_connector.py#L29
     # disable slurm detection by pl
     # this is not necessary for single machine, but might be for multi-node
     # may help stop tasks getting left on gpu after slurm exit?

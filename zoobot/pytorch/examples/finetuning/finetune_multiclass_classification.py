@@ -91,7 +91,7 @@ if __name__ == '__main__':
     """
     Under the hood, this is essentially doing:
 
-    import pytorch_lightning as pl
+    import lightning as L
     predict_trainer = L.Trainer(devices=1, max_epochs=-1)
     predict_datamodule = CatalogDataModule(
       label_cols=None,  # important, else you will get "conv2d() received an invalid combination of arguments"

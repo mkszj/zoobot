@@ -44,7 +44,7 @@ setuptools.setup(
             'torchvision',
             'torchaudio',
             'torchmetrics',
-            'pytorch_lightning >= 2.2.5',
+            'lightning >= 2.2.5',
             'pyro-ppl >= 1.8.6',
             'timm >= 1.0.15'
         ],

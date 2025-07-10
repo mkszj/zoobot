@@ -2,7 +2,7 @@ import logging
 from functools import partial
 from typing import List
 
-import pytorch_lightning as pl
+import lightning as L
 import timm
 import torch
 import torchmetrics

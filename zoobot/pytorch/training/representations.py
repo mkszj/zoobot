@@ -1,5 +1,5 @@
 import logging
-import pytorch_lightning as pl
+import lightning as L
 
 from timm import create_model
 
