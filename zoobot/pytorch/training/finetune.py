@@ -296,6 +296,10 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         else:
             model_to_optimize = self.encoder
 
+        if hasattr(model_to_optimize, 'pos_embed'):
+            logging.info("Encoder has pos_embed, will not train it")
+            model_to_optimize.pos_embed.requires_grad_(False)  # don't train pos_embed - typically, not a learnable parameter, despite timm defaults?
+
         if self.training_mode == 'full':
             logging.info("Training all parameters, not just the head")
             optimizer = create_optimizer_v2(
