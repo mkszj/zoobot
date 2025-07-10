@@ -10,6 +10,8 @@ from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
 from lightning.pytorch.callbacks import LearningRateMonitor
 
 import timm
+from timm.optim import create_optimizer_v2
+from timm.scheduler import create_scheduler_v2
 import torch
 import torch.nn.functional as F
 import torchmetrics as tm
@@ -56,10 +58,10 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         zoobot_checkpoint_loc (str, optional): Path to ZoobotTree lightning checkpoint to load. Loads with Load with :func:`zoobot.pytorch.training.finetune.load_pretrained_zoobot`. Defaults to None.
 
         n_blocks (int, optional):
-        lr_decay (float, optional): For each layer i below the head, reduce the learning rate by lr_decay ^ i. Defaults to 0.75.
+        layer_decay (float, optional): For each layer i below the head, reduce the learning rate by layer_decay ^ i. Defaults to 0.75.
         weight_decay (float, optional): AdamW weight decay arg (i.e. L2 penalty). Defaults to 0.05.
         learning_rate (float, optional): AdamW learning rate arg. Defaults to 1e-4.
-        dropout_prob (float, optional): P of dropout before final output layer. Defaults to 0.5.
+        head_dropout_prob (float, optional): P of dropout before final output layer. Defaults to 0.5.
         always_train_batchnorm (bool, optional): Temporarily deprecated. Previously, if True, do not update batchnorm stats during finetuning. Defaults to True.
         cosine_schedule (bool, optional): Reduce the learning rate each epoch according to a cosine schedule, after warmup_epochs. Defaults to False.
         warmup_epochs (int, optional): Linearly increase the learning rate from 0 to ``learning_rate`` over the first ``warmup_epochs`` epochs, before applying cosine schedule. No effect if cosine_schedule=False.
@@ -84,23 +86,19 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         # (aimed at supervised experiments)
         zoobot_checkpoint_loc=None,
         # finetuning settings
-        n_blocks=0,  # how many layers deep to FT
-        lr_decay=0.75,
+        # n_blocks=0,  # how many layers deep to FT
+        training_mode='full',  # 'full' to train all params, 'head_only' to freeze encoder and only train head
+        layer_decay=0.75,
         weight_decay=0.05,
         learning_rate=1e-4,  # 10x lower than typical, you may like to experiment
-        dropout_prob=0.5,
-        always_train_batchnorm=False,  # temporarily deprecated
+        head_dropout_prob=0.5,
         # these args are for the optional learning rate scheduler, best not to use unless you've tuned everything else already
-        cosine_schedule=False,
-        warmup_epochs=0,
-        max_cosine_epochs=100,
-        max_learning_rate_reduction_factor=0.01,
+        scheduler_kwargs=None,  # e.g. {'name': 'cosine', 'warmup_epochs': 5, 'max_epochs': 100}
         # escape hatch for 'from scratch' baselines
-        from_scratch=False,
+        # from_scratch=False,
         # debugging utils
         prog_bar=True,
         visualize_images=False,  # upload examples to wandb, good for debugging
-        n_layers=None, # deprecated (no effect) but can't remove yet as is an arg in some saved checkpoints
         seed=42,
     ):
         super().__init__()
@@ -150,26 +148,16 @@ class FinetuneableZoobotAbstract(L.LightningModule):
             else:  # resort to manual estimate
                 self.encoder_dim = define_model.get_encoder_dim(self.encoder)
 
-        self.n_blocks = n_blocks
+        self.training_mode = training_mode
 
         self.learning_rate = learning_rate
-        self.lr_decay = lr_decay
+        self.layer_decay = layer_decay
         self.weight_decay = weight_decay
-        self.dropout_prob = dropout_prob
+        self.head_dropout_prob = head_dropout_prob
 
-        self.cosine_schedule = cosine_schedule
-        self.warmup_epochs = warmup_epochs
-        self.max_cosine_epochs = max_cosine_epochs
-        self.max_learning_rate_reduction_factor = max_learning_rate_reduction_factor
+        self.scheduler_kwargs = scheduler_kwargs
 
-        self.from_scratch = from_scratch
-
-        self.always_train_batchnorm = always_train_batchnorm
-        if self.always_train_batchnorm:
-            raise NotImplementedError(
-                "Temporarily deprecated, always_train_batchnorm=True not supported"
-            )
-            # logging.info('always_train_batchnorm=True, so all batch norm layers will be finetuned')
+        # self.from_scratch = from_scratch
 
         self.train_loss_metric = tm.MeanMetric()
         self.val_loss_metric = tm.MeanMetric()
@@ -198,135 +186,175 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         and then pick the top self.n_blocks to finetune
 
         weight_decay is applied to both the head and (if relevant) the encoder
-        learning rate decay is applied to the encoder only: lr x (lr_decay^block_n), ignoring the head (block 0)
+        learning rate decay is applied to the encoder only: lr x (layer_decay^block_n), ignoring the head (block 0)
 
         What counts as a "block" is a bit fuzzy, but I generally use the self.encoder.stages from timm. I also count the stem as a block.
 
         batch norm layers may optionally still have updated statistics using always_train_batchnorm
         """
 
-        lr = self.learning_rate
-        params = [{"params": self.head.parameters(), "lr": lr}]
+
 
         logging.info(f"Encoder architecture to finetune: {type(self.encoder)}")
 
-        if self.from_scratch:
-            logging.warning(
-                "self.from_scratch is True, training everything and ignoring all settings"
-            )
-            params += [{"params": self.encoder.parameters(), "lr": lr}]
-            return torch.optim.AdamW(params, weight_decay=self.weight_decay)
+        # if self.from_scratch:
+        #     logging.warning(
+        #         "self.from_scratch is True, training everything and ignoring all settings"
+        #     )
+        #     params += [{"params": self.encoder.parameters(), "lr": lr}]
+        #     return torch.optim.AdamW(params, weight_decay=self.weight_decay)
 
-        if isinstance(self.encoder, timm.models.EfficientNet):  # includes v2
-            # TODO for now, these count as separate layers, not ideal
-            early_tuneable_layers = [self.encoder.conv_stem, self.encoder.bn1]
-            encoder_blocks = list(self.encoder.blocks)
-            tuneable_blocks = early_tuneable_layers + encoder_blocks
-        elif isinstance(self.encoder, timm.models.ResNet):
-            # all timm resnets seem to have this structure
-            tuneable_blocks = [
-                # similarly
-                self.encoder.conv1,
-                self.encoder.bn1,
-                self.encoder.layer1,
-                self.encoder.layer2,
-                self.encoder.layer3,
-                self.encoder.layer4,
-            ]
-        elif isinstance(self.encoder, timm.models.MaxxVit):
-            tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
-        elif isinstance(self.encoder, timm.models.ConvNeXt):  # stem + 4 blocks, for all sizes
-            # https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/convnext.py#L264
-            tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
+        # if isinstance(self.encoder, timm.models.EfficientNet):  # includes v2
+        #     # TODO for now, these count as separate layers, not ideal
+        #     early_tuneable_layers = [self.encoder.conv_stem, self.encoder.bn1]
+        #     encoder_blocks = list(self.encoder.blocks)
+        #     tuneable_blocks = early_tuneable_layers + encoder_blocks
+        # elif isinstance(self.encoder, timm.models.ResNet):
+        #     # all timm resnets seem to have this structure
+        #     tuneable_blocks = [
+        #         # similarly
+        #         self.encoder.conv1,
+        #         self.encoder.bn1,
+        #         self.encoder.layer1,
+        #         self.encoder.layer2,
+        #         self.encoder.layer3,
+        #         self.encoder.layer4,
+        #     ]
+        # elif isinstance(self.encoder, timm.models.MaxxVit):
+        #     tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
+        # elif isinstance(self.encoder, timm.models.ConvNeXt):  # stem + 4 blocks, for all sizes
+        #     # https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/convnext.py#L264
+        #     tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
 
-        # new
-        elif isinstance(self.encoder, timm.models.VisionTransformer):
-            tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
+        # # new
+        # elif isinstance(self.encoder, timm.models.VisionTransformer):
+        #     tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
 
-        elif hasattr(self.encoder, 'vit'):  # e.g. mae
-            logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
-            tuneable_blocks = [self.encoder.vit.patch_embed] + [stage for stage in self.encoder.vit.blocks]
+        # elif hasattr(self.encoder, 'vit'):  # e.g. mae
+        #     logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
+        #     tuneable_blocks = [self.encoder.vit.patch_embed] + [stage for stage in self.encoder.vit.blocks]
         
-        else:
-            raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
+        # else:
+        #     raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
                
-        # new
-        # interpret -1 as all blocks
-        if self.n_blocks == -1:
-            logging.info('n_blocks is -1, finetuning all blocks')
-            self.n_blocks = len(tuneable_blocks)
+        # # new
+        # # interpret -1 as all blocks
+        # if self.n_blocks == -1:
+        #     logging.info('n_blocks is -1, finetuning all blocks')
+        #     self.n_blocks = len(tuneable_blocks)
 
-        assert self.n_blocks <= len(
-            tuneable_blocks
-        ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
+        # assert self.n_blocks <= len(
+        #     tuneable_blocks
+        # ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
 
-        assert self.n_blocks <= len(
-            tuneable_blocks
-        ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
+        # assert self.n_blocks <= len(
+        #     tuneable_blocks
+        # ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
 
-        # take n blocks, ordered highest layer to lowest layer
-        tuneable_blocks.reverse()
-        logging.info(f"possible blocks to tune: {len(tuneable_blocks)}")
+        # # take n blocks, ordered highest layer to lowest layer
+        # tuneable_blocks.reverse()
+        # logging.info(f"possible blocks to tune: {len(tuneable_blocks)}")
 
-        # will finetune all params in first N
-        logging.info(f"blocks that will be tuned: {self.n_blocks}")
-        blocks_to_tune = tuneable_blocks[: self.n_blocks]
+        # # will finetune all params in first N
+        # logging.info(f"blocks that will be tuned: {self.n_blocks}")
+        # blocks_to_tune = tuneable_blocks[: self.n_blocks]
 
-        # optionally, can finetune batchnorm params in remaining layers
-        remaining_blocks = tuneable_blocks[self.n_blocks :]
-        logging.info(f"Remaining blocks: {len(remaining_blocks)}")
+        # # optionally, can finetune batchnorm params in remaining layers
+        # remaining_blocks = tuneable_blocks[self.n_blocks :]
+        # logging.info(f"Remaining blocks: {len(remaining_blocks)}")
 
-        assert not any(
-            [block in remaining_blocks for block in blocks_to_tune]
-        ), "Some blocks are in both tuneable and remaining"
+        # assert not any(
+        #     [block in remaining_blocks for block in blocks_to_tune]
+        # ), "Some blocks are in both tuneable and remaining"
 
-        # Append parameters of layers for finetuning along with decayed learning rate
-        for i, block in enumerate(blocks_to_tune):  # _ is the block name e.g. '3'
-            logging.info(f"Adding block {block} with lr {lr * (self.lr_decay**i)}")
-            params.append({"params": block.parameters(), "lr": lr * (self.lr_decay**i)})
+        # # Append parameters of layers for finetuning along with decayed learning rate
+        # for i, block in enumerate(blocks_to_tune):  # _ is the block name e.g. '3'
+        #     logging.info(f"Adding block {block} with lr {lr * (self.layer_decay**i)}")
+        #     params.append({"params": block.parameters(), "lr": lr * (self.layer_decay**i)})
 
-        # optionally, for the remaining layers (not otherwise finetuned) you can choose to still FT the batchnorm layers
-        for i, block in enumerate(remaining_blocks):
-            if self.always_train_batchnorm:
-                raise NotImplementedError
-                # _, block_batch_norm_params = get_batch_norm_params_lighting(block)
-                # params.append({
-                #     "params": block_batch_norm_params,
-                #     "lr": lr * (self.lr_decay**i)
-                # })
+        # # optionally, for the remaining layers (not otherwise finetuned) you can choose to still FT the batchnorm layers
+        # for i, block in enumerate(remaining_blocks):
+        #     if self.always_train_batchnorm:
+        #         raise NotImplementedError
+        #         # _, block_batch_norm_params = get_batch_norm_params_lighting(block)
+        #         # params.append({
+        #         #     "params": block_batch_norm_params,
+        #         #     "lr": lr * (self.layer_decay**i)
+        #         # })
 
-        logging.info(f"param groups: {len(params)}")
+        # logging.info(f"param groups: {len(params)}")
 
-        # because it iterates through the generators, THIS BREAKS TRAINING so only uncomment to debug params
-        # for param_group_n, param_group in enumerate(params):
-        #     shapes_within_param_group = [p.shape for p in list(param_group['params'])]
-        #     logging.debug('param group {}: {}'.format(param_group_n, shapes_within_param_group))
-        # print('head params to optimize', [p.shape for p in params[0]['params']])  # head only
-        # print(list(param_group['params']) for param_group in params)
-        # exit()
-        # Initialize AdamW optimizer
 
-        opt = torch.optim.AdamW(
-            params, weight_decay=self.weight_decay
-        )  # lr included in params dict
-        logging.info("Optimizer ready, configuring scheduler")
+        # opt = torch.optim.AdamW(
+        #     params, weight_decay=self.weight_decay
+        # )  # lr included in params dict
 
-        if self.cosine_schedule:
-            logging.info(
-                "Using lightly cosine schedule, warmup for {} epochs, max for {} epochs".format(
-                    self.warmup_epochs, self.max_cosine_epochs
-                )
+
+        if hasattr(self.encoder, 'vit'):  # e.g. mae
+            logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
+            model_to_optimize = self.encoder.vit
+        else:
+            model_to_optimize = self.encoder
+
+        if self.training_mode == 'full':
+            logging.info("Training all parameters, not just the head")
+            optimizer = create_optimizer_v2(
+                model_to_optimize,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay= self.layer_decay
             )
-            # from lightly.utils.scheduler import CosineWarmupScheduler  #copied from here to avoid dependency
-            # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
-            # Dictionary, with an "optimizer" key, and (optionally) a "lr_scheduler" key whose value is a single LR scheduler or lr_scheduler_config.
-            lr_scheduler = schedulers.CosineWarmupScheduler(
-                optimizer=opt,
-                warmup_epochs=self.warmup_epochs,
-                max_epochs=self.max_cosine_epochs,
-                start_value=self.learning_rate,
-                end_value=self.learning_rate * self.max_learning_rate_reduction_factor,
+            # add head parameters to optimizer
+            optimizer.add_param_group({'params': self.head.parameters(), 'lr': self.learning_rate})
+        elif self.training_mode == 'head_only':
+            logging.info("Training only the head, encoder frozen")
+            # freeze encoder
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            # freeze_batchnorm_layers(self.encoder)
+            optimizer = create_optimizer_v2(
+                self.head,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay=None
             )
+
+        logging.info("Optimizer ready")
+
+        if self.scheduler_kwargs is not None:
+            logging.info(f"Using scheduler with kwargs: {self.scheduler_kwargs}")
+            # https://github.com/rwightman/timm/blob/main/timm/scheduler/scheduler_factory.py#L63
+            scheduler, _ = create_scheduler_v2(optimizer, **self.scheduler_kwargs) # e.g. 'cosine', warmup_epochs=5)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+        else:
+            logging.info("Learning rate scheduler not used")
+            return optimizer
+
+        # if self.cosine_schedule:
+        #     logging.info(
+        #         "Using lightly cosine schedule, warmup for {} epochs, max for {} epochs".format(
+        #             self.warmup_epochs, self.max_cosine_epochs
+        #         )
+        #     )
+        #     # from lightly.utils.scheduler import CosineWarmupScheduler  #copied from here to avoid dependency
+        #     # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
+        #     # Dictionary, with an "optimizer" key, and (optionally) a "lr_scheduler" key whose value is a single LR scheduler or lr_scheduler_config.
+        #     lr_scheduler = schedulers.CosineWarmupScheduler(
+        #         optimizer=opt,
+        #         warmup_epochs=self.warmup_epochs,
+        #         max_epochs=self.max_cosine_epochs,
+        #         start_value=self.learning_rate,
+        #         end_value=self.learning_rate * self.max_learning_rate_reduction_factor,
+        #     )
 
             # logging.info('Using CosineAnnealingLR schedule, warmup not supported, max for {} epochs'.format(self.max_cosine_epochs))
             # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -335,17 +363,6 @@ class FinetuneableZoobotAbstract(L.LightningModule):
             #     eta_min=self.learning_rate * self.max_learning_rate_reduction_factor
             # )
 
-            return {
-                "optimizer": opt,
-                "lr_scheduler": {
-                    "scheduler": lr_scheduler,
-                    "interval": "epoch",
-                    "frequency": 1,
-                },
-            }
-        else:
-            logging.info("Learning rate scheduler not used")
-        return opt
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
@@ -477,7 +494,7 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
         self.head = LinearHead(
             input_dim=self.encoder_dim,
             output_dim=num_classes,
-            dropout_prob=self.dropout_prob,
+            head_dropout_prob=self.head_dropout_prob,
         )
         self.label_smoothing = label_smoothing
 
@@ -648,7 +665,7 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
         self.head = LinearHead(
             input_dim=self.encoder_dim,
             output_dim=1,
-            dropout_prob=self.dropout_prob,
+            head_dropout_prob=self.head_dropout_prob,
             activation=head_activation,
         )
         if loss in ["mse", "mean_squared_error"]:
@@ -745,7 +762,7 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
             encoder_dim=self.encoder_dim,
             output_dim=self.output_dim,
             test_time_dropout=False,
-            dropout_rate=self.dropout_prob,
+            dropout_rate=self.head_dropout_prob,
         )
 
         self.loss = define_model.get_dirichlet_loss_func(self.schema.question_answer_pairs)
@@ -770,7 +787,7 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
 
 
 class LinearHead(torch.nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, dropout_prob=0.5, activation=None):
+    def __init__(self, input_dim: int, output_dim: int, head_dropout_prob=0.5, activation=None):
         """
         Small utility class for a linear head with dropout and optional choice of activation.
 
@@ -781,7 +798,7 @@ class LinearHead(torch.nn.Module):
         Args:
             input_dim (int): input dim of the linear layer (i.e. the encoder output dimension)
             output_dim (int): output dim of the linear layer (often e.g. N for N classes, or 1 for regression)
-            dropout_prob (float, optional): Dropout probability. Defaults to 0.5.
+            head_dropout_prob (float, optional): Dropout probability. Defaults to 0.5.
             activation (callable, optional): callable expecting tensor e.g. torch softmax. Defaults to None.
         """
         # input dim is representation dim, output_dim is num classes
@@ -789,7 +806,7 @@ class LinearHead(torch.nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
 
-        self.dropout = torch.nn.Dropout(p=dropout_prob)
+        self.dropout = torch.nn.Dropout(p=head_dropout_prob)
         self.linear = torch.nn.Linear(input_dim, output_dim)
         self.activation = activation
 
