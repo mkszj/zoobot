@@ -2,7 +2,7 @@ import logging
 import os
 import argparse
 
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 import wandb
 
 from zoobot.pytorch.training import train_with_pytorch_lightning

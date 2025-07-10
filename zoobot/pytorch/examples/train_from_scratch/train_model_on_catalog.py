@@ -3,7 +3,7 @@ import os
 import argparse
 
 import pandas as pd
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 
 from galaxy_datasets.shared import label_metadata
 from zoobot.shared import schemas

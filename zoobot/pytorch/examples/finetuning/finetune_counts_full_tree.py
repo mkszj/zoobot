@@ -78,7 +78,7 @@ if __name__ == '__main__':
         repo_dir, f'gz-decals-classifiers/results/finetune_{np.random.randint(1e8)}')
 
     # can do logger=None or, to use wandb:
-    from pytorch_lightning.loggers import WandbLogger
+    from lightning.pytorch.loggers import WandbLogger
     logger = WandbLogger(project='finetune', name='full_tree_example')
 
     trainer = finetune.get_trainer(save_dir=save_dir, logger=logger, accelerator=accelerator)

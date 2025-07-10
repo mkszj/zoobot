@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from timm import create_model
 
 
-class ZoobotEncoder(pl.LightningModule):
+class ZoobotEncoder(L.LightningModule):
 
     def __init__(self, encoder):
         super().__init__()

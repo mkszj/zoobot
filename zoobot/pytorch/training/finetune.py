@@ -6,9 +6,9 @@ from functools import partial
 
 import numpy as np
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
-from pytorch_lightning.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
+from lightning.pytorch.callbacks import LearningRateMonitor
 
 import torch
 import torch.nn.functional as F
@@ -32,7 +32,7 @@ def freeze_batchnorm_layers(model):
             freeze_batchnorm_layers(child)  # recurse
 
 
-class FinetuneableZoobotAbstract(pl.LightningModule):
+class FinetuneableZoobotAbstract(L.LightningModule):
     """
     Parent class of :class:`FinetuneableZoobotClassifier`, :class:`FinetuneableZoobotRegressor`, :class:`FinetuneableZoobotTree`.
     You cannot use this class directly - you must use the child classes above instead.
@@ -519,7 +519,7 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
 
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):
-      # self.logger is set by pl.Trainer(logger=) argument
+      # self.logger is set by L.Trainer(logger=) argument
         if (self.logger is not None) and (batch_idx == 0):
             x, y = batch
             y_pred_softmax = F.softmax(outputs['predictions'], dim=1)
@@ -824,7 +824,7 @@ def get_trainer(
     accelerator='auto',
     logger=None,
     **trainer_kwargs
-) -> pl.Trainer:
+) -> L.Trainer:
     """
     Convenience wrapper to create a PyTorch Lightning Trainer that carries out the finetuning process.
     Use like so: trainer.fit(model, datamodule)
@@ -846,10 +846,10 @@ def get_trainer(
         patience (int, optional): wait up to this many epochs for decreasing loss before ending training. Defaults to 10.
         devices (str, optional): number of devices for training (typically, num. GPUs). Defaults to 'auto'.
         accelerator (str, optional): which device to use (typically 'gpu' or 'cpu'). Defaults to 'auto'.
-        logger (pl.loggers.wandb_logger, optional): If pl.loggers.wandb_logger, track experiment on Weights and Biases. Defaults to None.
+        logger (L.pytorch.loggers.wandb_logger, optional): If L.pytorch.loggers.wandb_logger, track experiment on Weights and Biases. Defaults to None.
 
     Returns:
-        pl.Trainer: PyTorch Lightning trainer object for finetuning a model on a GalaxyDataModule.
+        L.Trainer: PyTorch Lightning trainer object for finetuning a model on a GalaxyDataModule.
     """
 
     checkpoint_callback = ModelCheckpoint(
@@ -873,7 +873,7 @@ def get_trainer(
     learning_rate_monitor_callback = LearningRateMonitor(logging_interval='epoch')
 
     # Initialise pytorch lightning trainer
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         logger=logger,
         callbacks=[checkpoint_callback, early_stopping_callback, learning_rate_monitor_callback],
         max_epochs=max_epochs,

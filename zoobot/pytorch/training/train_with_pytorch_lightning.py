@@ -4,11 +4,11 @@ from typing import Tuple
 
 import torch
 import pytorch_lightning as pl
-from pytorch_lightning.plugins import TorchSyncBatchNorm
-from pytorch_lightning.strategies.ddp import DDPStrategy
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import CSVLogger
+from lightning.pytorch.plugins import TorchSyncBatchNorm
+from lightning.pytorch.strategies.ddp import DDPStrategy
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.loggers import CSVLogger
 
 from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
 from galaxy_datasets.pytorch.webdatamodule import WebDataModule
@@ -68,7 +68,7 @@ def train_default_zoobot_from_scratch(
     extra_callbacks=None,
     # replication parameters
     random_state=42
-) -> Tuple[define_model.ZoobotTree, pl.Trainer]:
+) -> Tuple[define_model.ZoobotTree, L.Trainer]:
     """
     Train Zoobot from scratch on a big galaxy catalog.
 
@@ -108,7 +108,7 @@ def train_default_zoobot_from_scratch(
         prefetch_factor (int, optional): Num. batches to queue in memory per dataloader. See torch dataloader docs. Defaults to 4.
         mixed_precision (bool, optional): Use (mostly) half-precision to halve memory requirements. May cause instability. See Lightning Trainer docs. Defaults to False.
         compile_encoder (bool, optional): Compile the encoder with torch.compile (new in torch v2). Defaults to False.
-        wandb_logger (pl.loggers.wandb.WandbLogger, optional): Logger to track experiments on Weights and Biases. Defaults to None.
+        wandb_logger (L.pytorch.loggers.wandb.WandbLogger, optional): Logger to track experiments on Weights and Biases. Defaults to None.
         checkpoint_file_template (str, optional): formatting for checkpoint filename. See Lightning docs. Defaults to None.
         auto_insert_metric_name (bool, optional): escape "/" in metric names when naming checkpoints. See Lightning docs. Defaults to True.
         save_top_k (int, optional): Keep the k best checkpoints. See Lightning docs. Defaults to 3.
@@ -116,14 +116,14 @@ def train_default_zoobot_from_scratch(
         random_state (int, optional): Seed. Defaults to 42.
 
     Returns:
-        Tuple[define_model.ZoobotTree, pl.Trainer]: Trained ZoobotTree model, and Trainer with which it was trained.
+        Tuple[define_model.ZoobotTree, L.Trainer]: Trained ZoobotTree model, and Trainer with which it was trained.
     """
     logging.info('home within Zoobot: {}'.format(os.getenv('HOME')))
     # some optional logging.debug calls recording cluster environment
     slurm_debugging_logs()
 
     # redundant when already called before this, but no harm doing twice
-    pl.seed_everything(random_state)
+    L.seed_everything(random_state)
 
     assert save_dir is not None
     if not os.path.isdir(save_dir):
@@ -317,7 +317,7 @@ def train_default_zoobot_from_scratch(
     if extra_callbacks:
         callbacks += extra_callbacks 
 
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         num_sanity_val_steps=0,
         log_every_n_steps=150,
         accelerator=accelerator,
@@ -404,7 +404,7 @@ def get_default_callbacks(save_dir, patience=8, checkpoint_file_template=None, a
             mode='min',
             # custom filename for checkpointing due to / in metric
             filename=checkpoint_file_template,
-            # https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html#pytorch_lightning.callbacks.ModelCheckpoint.params.auto_insert_metric_name
+            # https://pytorch-lightning.readthedocs.io/en/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html#lightning.pytorch.callbacks.ModelCheckpoint.params.auto_insert_metric_name
             # avoids extra folders from the checkpoint name
             auto_insert_metric_name=auto_insert_metric_name,
             save_top_k=save_top_k

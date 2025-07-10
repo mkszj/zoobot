@@ -11,18 +11,18 @@ from zoobot.shared import save_predictions
 from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
 
 
-def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, label_cols: List, save_loc: str, datamodule_kwargs={}, trainer_kwargs={}) -> None:
+def predict(catalog: pd.DataFrame, model: L.LightningModule, n_samples: int, label_cols: List, save_loc: str, datamodule_kwargs={}, trainer_kwargs={}) -> None:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
     Args:
         catalog (pd.DataFrame): catalog of galaxies to make predictions on. Must include `file_loc` and `id_str` columns.
-        model (pl.LightningModule): with which to make predictions. Probably ZoobotTree, FinetuneableZoobotClassifier, FinetuneableZoobotTree, or ZoobotEncoder.
+        model (L.LightningModule): with which to make predictions. Probably ZoobotTree, FinetuneableZoobotClassifier, FinetuneableZoobotTree, or ZoobotEncoder.
         n_samples (int): num. of forward passes to make per galaxy. Useful to marginalise over augmentations/test-time dropout.
         label_cols (List): Names for prediction columns. Only for your convenience - has no effect on predictions.
         save_loc (str): desired name of file recording the predictions
         datamodule_kwargs (dict, optional): Passed to GalaxyDataModule. Use to e.g. add custom augmentations. Defaults to {}.
-        trainer_kwargs (dict, optional): Passed to pl.Trainer. Defaults to {}.
+        trainer_kwargs (dict, optional): Passed to L.Trainer. Defaults to {}.
     """
 
     image_id_strs = list(catalog['id_str'].astype(str))
@@ -48,7 +48,7 @@ def predict(catalog: pd.DataFrame, model: pl.LightningModule, n_samples: int, la
 
 
     # set up trainer (again)
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         max_epochs=-1,  # does nothing in this context, suppresses warning
         **trainer_kwargs  # e.g. gpus
     )

@@ -74,7 +74,7 @@ if __name__ == '__main__':
     Under the hood, this is essentially doing:
 
     import pytorch_lightning as pl
-    predict_trainer = pl.Trainer(devices=1, max_epochs=-1)
+    predict_trainer = L.Trainer(devices=1, max_epochs=-1)
     predict_datamodule = GalaxyDataModule(
       label_cols=None,  # important, else you will get "conv2d() received an invalid combination of arguments"
       predict_catalog=test_catalog,

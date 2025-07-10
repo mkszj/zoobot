@@ -43,7 +43,7 @@ from zoobot.pytorch.training import losses, schedulers
 
 
 
-class GenericLightningModule(pl.LightningModule):
+class GenericLightningModule(L.LightningModule):
     """
     All Zoobot models use the lightningmodule API and so share this structure
     super generic, just to outline the structure. nothing specific to dirichlet, gz, etc
