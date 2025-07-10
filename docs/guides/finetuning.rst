@@ -60,7 +60,7 @@ These files are called checkpoints (like video game save files - computer scient
     model = finetune.FinetuneableZoobotClassifier(
       name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano',  # which pretrained model to download
       num_classes=2,
-      n_layers=0
+      n_blocks=0
     )
 
 You can see the list of pretrained models at :doc:`/pretrained_models`.
@@ -68,8 +68,8 @@ You can see the list of pretrained models at :doc:`/pretrained_models`.
 What about the other arguments?
 When loading the checkpoint, FinetuneableZoobotClassifier will automatically change the head layer to suit a classification problem (hence, ``Classifier``).
 ``num_classes=2`` specifies how many classes we have, Here, two classes (a.k.a. binary classification).
-``n_layers=0`` specifies how many layers (other than the output layer) we want to finetune.
-0 indicates no other layers, so we will only be changing the weights of the output layer.
+``n_blocks=0`` specifies how many inner blocks (groups of layers, excluding the output layer) we want to finetune.
+0 indicates no other blocks, so we will only be changing the weights of the output layer.
 
 
 Prepare Galaxy Data
@@ -88,11 +88,11 @@ This downloads the demo rings dataset. ``train_catalog`` is a table of galaxies 
 - ``file_loc``, a path to the image (jpg, png, or fits) containing the galaxy
 - ``ring``, the label (either 0 or 1)
 
-Then we can use ``GalaxyDataModule`` to tell PyTorch to load the images and labels in this catalog:
+Then we can use ``CatalogDataModule`` to tell PyTorch to load the images and labels in this catalog:
 
 .. code-block:: python
 
-    datamodule = GalaxyDataModule(
+    datamodule = CatalogDataModule(
       label_cols=['ring'],
       catalog=train_catalog,
       batch_size=32
@@ -106,7 +106,8 @@ Here, there's only one label column, but it should still be a list.
 If your computer throws out-of-memory errors, you may need to reduce this.
 If training is very slow, you can increase this.
 
-``GalaxyDataModule`` has many other options for specifying how to transform the images before passing them to the network ("augmentations")
+``CatalogDataModule`` will, by default, transform the images before passing them to the network ("augmentations").
+You can choose any augmentations: specify them with the ```requested_transform`` argument. Use a tuple for (train, test) transforms. Any ``T.Compose`` object is supported.
 See the `code <https://github.com/mwalmsley/galaxy-datasets/blob/main/galaxy_datasets/pytorch/galaxy_datamodule.py#L18>`__ (in another repo).
 
 

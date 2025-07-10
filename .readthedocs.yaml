@@ -15,3 +15,5 @@ python:
 
 sphinx:
   fail_on_warning: true
+  # https://about.readthedocs.com/blog/2024/12/deprecate-config-files-without-sphinx-or-mkdocs-config/
+  configuration: docs/conf.py

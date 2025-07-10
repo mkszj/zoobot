@@ -2,16 +2,16 @@
 Loading Data
 --------------------------
 
-Using GalaxyDataModule
+Using CatalogDataModule
 =========================
 
 Zoobot often includes code like:
 
 .. code-block:: python
 
-    from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+    from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
-    datamodule = GalaxyDataModule(
+    datamodule = CatalogDataModule(
         train_catalog=train_catalog,
         val_catalog=val_catalog,
         test_catalog=test_catalog,
@@ -26,17 +26,13 @@ That's in the separate repository `mwalmsley/galaxy-datasets <https://github.com
 ``galaxy-datasets`` has custom code to turn catalogs of galaxies into the ``LightningDataModule`` that Lightning `expects <https://pytorch-lightning.readthedocs.io/en/stable/data/datamodule.html>`_.
 Each ``LightningDataModule`` has attributes like ``.train_dataloader()`` and ``.predict_dataloader()`` that Lightning's ``Trainer`` object uses to demand data when training, making predictions, and so forth.
 
-You can pass ``GalaxyDataModule`` train, val, test and predict catalogs. Each catalog needs the columns:
+You can pass ``CatalogDataModule`` train, val, test and predict catalogs. Each catalog needs the columns:
 
 * ``file_loc``: the path to the image file
 * ``id_str``: a unique identifier for the galaxy
 * plus any columns for labels, which you will specify with ``label_cols``. Setting ``label_cols=None`` will load the data without labels (returning batches of (image, id_str)).
 
-``GalaxyDataModule`` will load the images from disk and apply any transformations you specify. Specify transforms one of three ways:
-
-* through the `default arguments <https://github.com/mwalmsley/galaxy-datasets/blob/main/galaxy_datasets/pytorch/galaxy_datamodule.py>`_ of ``GalaxyDataModule`` (e.g. ``GalaxyDataModule(resize_after_crop=(128, 128))``)
-* through a torchvision or albumentations ``Compose`` object e.g. ``GalaxyDataModule(custom_torchvision_transforms=Compose([RandomHorizontalFlip(), RandomVerticalFlip()]))``
-* through a tuple of ``Compose`` objects. The first element will be used for the train dataloaders, and the second for the other dataloaders.
+``CatalogDataModule`` will load the images from disk and apply any transformations you specify. Specify transforms through a tuple of ``T.Compose`` objects. The first element will be used for the train dataloaders, and the second for the test dataloaders.
 
 Using the default arguments is simplest and should work well for loading Galaxy-Zoo-like ``jpg`` images. Passing Compose objects offers full customization (short of writing your own ``LightningDataModule``). On that note...
 

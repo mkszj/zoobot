@@ -10,7 +10,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
 
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 from galaxy_datasets.pytorch.webdatamodule import WebDataModule
 from galaxy_datasets import transforms
 
@@ -25,10 +25,10 @@ def train_default_zoobot_from_scratch(
     save_dir: str,  # save model here
     schema: Schema,  # answer these questions
     # augmentation parameters are required, see github/mwalmsley/galaxy-datasets
-    # specify either one transform_cfg for both train and inference, or two separate ones
-    transform_cfg: None,
-    train_transform_cfg: None,
-    inference_transform_cfg: None,
+    # specify either one transform_cfg for both train and test/inference, or two separate ones
+    transform_cfg=None,
+    train_transform_cfg=None,
+    inference_transform_cfg=None,
     # input data - specify *either* catalog (to be split) or the splits themselves
     catalog=None,
     train_catalog=None,
@@ -147,6 +147,11 @@ def train_default_zoobot_from_scratch(
     logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
     logging.info(f'Using inference_transform_cfg: {inference_transform_cfg}')
 
+    # same transforms regardless of images or webdataset
+    # GalaxyViewTransform is my custom class for making transforms, and includes .transform to get the T.Compose object
+    train_transform = transforms.get_galaxy_transform(train_transform_cfg)
+    inference_transform = transforms.get_galaxy_transform(inference_transform_cfg)
+
     strategy = 'auto'
     plugins = None
     if (gpus is not None) and (gpus > 1):
@@ -226,7 +231,7 @@ def train_default_zoobot_from_scratch(
     webdatasets = train_urls is not None
 
     if single_catalog or split_catalogs:
-        # this branch will use GalaxyDataModule to load catalogs
+        # this branch will use CatalogDataModule to load catalogs
         assert not webdatasets
         if single_catalog:
             assert not split_catalogs
@@ -239,12 +244,12 @@ def train_default_zoobot_from_scratch(
                 'val_catalog': val_catalog,
                 'test_catalog': test_catalog  # may be None
             }
-        datamodule = GalaxyDataModule(
+        datamodule = CatalogDataModule(
             label_cols=schema.label_cols,
             # can take either a catalog (and split it), or a pre-split catalog
             **data_to_use,
             # augmentations parameters, now using torchvision
-            custom_torchvision_transform=(train_transform_cfg, inference_transform_cfg),
+            requested_transform=(train_transform, inference_transform),
             # hardware parameters
             batch_size=batch_size, # on 2xA100s, 256 with DDP, 512 with distributed (i.e. split batch)
             num_workers=num_workers,
@@ -253,7 +258,7 @@ def train_default_zoobot_from_scratch(
     else:
         assert webdatasets  # train_urls is not None
         # this branch will use WebDataModule to load premade webdatasets
-        # uses new torchvision transforms         
+        # will use new torchvision transforms         
 
         datamodule = WebDataModule(
             train_urls=train_urls,
@@ -266,15 +271,14 @@ def train_default_zoobot_from_scratch(
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
             cache_dir=cache_dir,
-            # augmentation args REMOVED
-            # uses new torchvision transforms
-            train_transform=transforms.GalaxyViewTransform(train_transform_cfg),
-            inference_transform=transforms.GalaxyViewTransform(inference_transform_cfg),
+            train_transform=train_transform,
+            inference_transform=inference_transform
         )
 
     # debug - check range of loaded images, should be 0-1
     datamodule.setup(stage='fit')
-    for (images, _) in datamodule.train_dataloader():
+    for batch in datamodule.train_dataloader():
+        images = batch['image']
         logging.info(f'Using batches of {images.shape[0]} images for training')
         logging.info('First batch image min/max: {}/{}'.format(images.min(), images.max()))
         assert images.max() <= 1.0001

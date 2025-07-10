@@ -10,7 +10,7 @@
 <a href="https://ascl.net/2203.027"><img src="https://img.shields.io/badge/ascl-2203.027-blue.svg?colorB=262255" alt="ascl:2203.027" /></a>
 
 ---
-### :tada: Zoobot 2.0 is now available. We added bigger and better models with streamlined finetuning. :tada:
+### :tada: Zoobot 2.0 is now available. Bigger and better models with streamlined finetuning. [Blog](https://walmsley.dev/posts/zoobot-scaling-laws), [paper](https://arxiv.org/abs/2404.02973) :tada:
 ---
 
 Zoobot classifies galaxy morphology with deep learning.
@@ -24,6 +24,7 @@ Zoobot is trained using millions of answers by Galaxy Zoo volunteers. This code 
 - [Pretrained Weights](https://zoobot.readthedocs.io/en/latest/pretrained_models.html)
 - [Datasets](https://www.github.com/mwalmsley/galaxy-datasets)
 - [Documentation](https://zoobot.readthedocs.io/) (for understanding/reference)
+- [Mailing List](https://groups.google.com/g/zoobot) (for updates)
 
 ## Installation
 
@@ -35,16 +36,9 @@ Download the code using git:
 
     git clone git@github.com:mwalmsley/zoobot.git
 
-And then pick one of the three commands below to install Zoobot and PyTorch:
+And then install Zoobot (and PyTorch, if not already installed):
 
-    # Zoobot with PyTorch and a GPU. Requires CUDA 12.1 (or CUDA 11.8, if you use `_cu118` instead)
-    pip install -e "zoobot[pytorch-cu121]" --extra-index-url https://download.pytorch.org/whl/cu121
-
-    # OR Zoobot with PyTorch and no GPU
-    pip install -e "zoobot[pytorch-cpu]" --extra-index-url https://download.pytorch.org/whl/cpu
-
-    # OR Zoobot with PyTorch on Mac with M1 chip
-    pip install -e "zoobot[pytorch-m1]"
+    pip install -e "zoobot[pytorch]"
 
 This installs the downloaded Zoobot code using pip [editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs) so you can easily change the code locally. Zoobot is also available directly from pip (`pip install zoobot[option]`). Only use this if you are sure you won't be making changes to Zoobot itself. For Google Colab, use `pip install zoobot[pytorch_colab]`
 
@@ -59,44 +53,44 @@ The [Colab notebook](https://colab.research.google.com/drive/1A_-M3Sz5maQmyfW2A7
 
 Let's say you want to find ringed galaxies and you have a small labelled dataset of 500 ringed or not-ringed galaxies. You can retrain Zoobot to find rings like so:
 
-    ```python
+```python
+import pandas as pd
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
+from zoobot.pytorch.training import finetune
 
-    import pandas as pd
-    from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
-    from zoobot.pytorch.training import finetune
+# csv with 'ring' column (0 or 1) and 'file_loc' column (path to image)
+labelled_df = pd.read_csv('/your/path/some_labelled_galaxies.csv')
 
-    # csv with 'ring' column (0 or 1) and 'file_loc' column (path to image)
-    labelled_df = pd.read_csv('/your/path/some_labelled_galaxies.csv')
+datamodule = CatalogDataModule(
+    label_cols=['ring'],
+    catalog=labelled_df,
+    batch_size=32
+    # will automatically apply default augmentations
+)
 
-    datamodule = GalaxyDataModule(
-      label_cols=['ring'],
-      catalog=labelled_df,
-      batch_size=32
-    )
+# load trained Zoobot model
+model = finetune.FinetuneableZoobotClassifier(checkpoint_loc, num_classes=2)  
 
-    # load trained Zoobot model
-    model = finetune.FinetuneableZoobotClassifier(checkpoint_loc, num_classes=2)  
-    
-    # retrain to find rings
-    trainer = finetune.get_trainer(save_dir)
-    trainer.fit(model, datamodule)
-    ```
+# retrain to find rings
+trainer = finetune.get_trainer(save_dir)
+trainer.fit(model, datamodule)
+```
 
 Then you can make predict if new galaxies have rings:
 
-    ```python
-    from zoobot.pytorch.predictions import predict_on_catalog
+```python
+from zoobot.pytorch.predictions import predict_on_catalog
 
-    # csv with 'file_loc' column (path to image). Zoobot will predict the labels.
-    unlabelled_df = pd.read_csv('/your/path/some_unlabelled_galaxies.csv')
+# csv with 'file_loc' column (path to image). Zoobot will predict the labels.
+unlabelled_df = pd.read_csv('/your/path/some_unlabelled_galaxies.csv')
 
-    predict_on_catalog.predict(
-      unlabelled_df,
-      model,
-      label_cols=['ring'],  # only used for 
-      save_loc='/your/path/finetuned_predictions.csv'
-    )
-    ```
+predict_on_catalog.predict(
+    unlabelled_df,
+    model,
+    label_cols=['ring'],  # only used for 
+    save_loc='/your/path/finetuned_predictions.csv'
+)
+```
 
 Zoobot includes many guides and working examples - see the [Getting Started](#getting-started) section below.
 
@@ -126,15 +120,16 @@ There is more explanation and an API reference on the [docs](https://zoobot.read
 
 <a name="install_cuda"></a>
 
-*If you're not using a GPU, skip this step. Use the pytorch-cpu option in the section below.*
+*If you're not using a GPU, skip this step*
 
-Install PyTorch 2.1.0 and compatible CUDA drivers. I highly recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) to do this. Conda will handle both creating a new virtual environment (`conda create`) and installing CUDA (`cudatoolkit`, `cudnn`)
+I highly recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) (or `mamba`, same thing but faster) to do this. Conda will handle both creating a new virtual environment (`conda create`) and installing CUDA (`cudatoolkit`, `cudnn`)
 
-CUDA 12.1 for PyTorch 2.1.0:
+CUDA 12.8 for PyTorch 2.7.0:
 
     conda create --name zoobot39_torch python==3.9
     conda activate zoobot39_torch
-    conda install -c conda-forge cudatoolkit=12.1
+    conda install nvidia/label/cuda-12.8.1::cuda
+    conda install nvidia/label/cuda-12.8.1::cuda-toolkit
 
 ### Recent release features (v2.0.0)
 
@@ -152,7 +147,7 @@ CUDA 12.1 for PyTorch 2.1.0:
 - Added option to compile encoder for max speed (not recommended for finetuning, only for pretraining).
 - Deprecates TensorFlow. The CS research community focuses on PyTorch and new frameworks like JAX.
 
-Contributions are very welcome and will be credited in any future work. Please get in touch! See [CONTRIBUTING.md](https://github.com/mwalmsley/zoobot/blob/main/benchmarks) for more.
+Contributions are very welcome and will be credited in any future work. Please get in touch! See [CODE_OF_CONDUCT.md](https://github.com/mwalmsley/zoobot/blob/main/CODE_OF_CONDUCT.md) for more.
 
 ### Benchmarks and Replication - Training from Scratch
 
@@ -177,8 +172,21 @@ You might be interested in reading papers using Zoobot:
 - [Harnessing the Hubble Space Telescope Archives: A Catalogue of 21,926 Interacting Galaxies](https://arxiv.org/abs/2303.00366) (2023)
 - [Galaxy Zoo DESI: Detailed morphology measurements for 8.7M galaxies in the DESI Legacy Imaging Surveys](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/stad2919/7283169?login=false) (2023)
 - [Galaxy mergers in Subaru HSC-SSP: A deep representation learning approach for identification, and the role of environment on merger incidence](https://doi.org/10.1051/0004-6361/202346743) (2023)
-- [Astronomaly at Scale: Searching for Anomalies Amongst 4 Million Galaxies](https://arxiv.org/abs/2309.08660) (2023, submitted)
-- [Transfer learning for galaxy feature detection: Finding Giant Star-forming Clumps in low redshift galaxies using Faster R-CNN](https://arxiv.org/abs/2312.03503) (2023)
+- [Rare Galaxy Classes Identified In Foundation Model Representations](https://arxiv.org/abs/2312.02910) (2023)
+- [Astronomaly at Scale: Searching for Anomalies Amongst 4 Million Galaxies](https://arxiv.org/abs/2309.08660) (2024)
+- [Transfer learning for galaxy feature detection: Finding Giant Star-forming Clumps in low redshift galaxies using Faster R-CNN](https://arxiv.org/abs/2312.03503) (2024)
 - [Euclid preparation. Measuring detailed galaxy morphologies for Euclid with Machine Learning](https://arxiv.org/abs/2402.10187) (2024, submitted)
+- [Scaling Laws for Galaxy Images](https://arxiv.org/abs/2404.02973) (2024, submitted)
+- [Galaxy Zoo Evo: 107M volunteer labels for 823k galaxy images](https://huggingface.co/collections/mwalmsley/galaxy-zoo-evo-66532c6c258f5fad31f31880) (2024, submitted)
 
-Many other works use Zoobot indirectly via the [Galaxy Zoo DECaLS](https://arxiv.org/abs/2102.08414) catalog (and now via the new [Galaxy Zoo DESI](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/stad2919/7283169?login=false) catalog).
+Many other works use Zoobot indirectly via the [Galaxy Zoo DECaLS](https://arxiv.org/abs/2102.08414) and [Galaxy Zoo DESI](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/stad2919/7283169?login=false) morphology catalogs, for example:
+
+- [Galaxy zoo: stronger bars facilitate quenching in star-forming galaxies](https://ui.adsabs.harvard.edu/abs/2021MNRAS.507.4389G/abstract) (2022)
+- [The Effect of Environment on Galaxy Spiral Arms, Bars, Concentration, and Quenching](https://ui.adsabs.harvard.edu/abs/2022AJ....164..146S/abstract) (2022)
+- [Galaxy Zoo: kinematics of strongly and weakly barred galaxies](https://ui.adsabs.harvard.edu/abs/2023MNRAS.521.1775G/abstract) (2023)
+- [Dependence of galactic bars on the tidal density field in the SDSS](https://ui.adsabs.harvard.edu/abs/2023MNRAS.525.1520D/abstract) (2023)
+- [Galaxy Zoo DESI: large-scale bars as a secular mechanism for triggering AGN](https://arxiv.org/abs/2406.20096) (2024)
+- [Galaxy zoo: stronger bars facilitate quenching in star-forming galaxies ](https://arxiv.org/abs/2405.05960) (2024, submitted)
+- [Uncovering Tidal Treasures: Automated Classification of Faint Tidal Features in DECaLS Data](https://arxiv.org/abs/2404.06487) (2024, submitted)
+
+Zoobot is deployed on the Euclid pipeline to produce the OU-MER morphology catalog. This is available as part of each Euclid data release (currently internal only, public release of Q1 data anticipated in Q2 2025).
