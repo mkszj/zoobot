@@ -97,6 +97,8 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         # escape hatch for 'from scratch' baselines
         # from_scratch=False,
         # debugging utils
+        timm_kwargs={},  # e.g. {'in_chans': 1} for greyscale models
+        greyscale=False,
         prog_bar=True,
         visualize_images=False,  # upload examples to wandb, good for debugging
         seed=42,
@@ -115,15 +117,18 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         # if you need the encoder to recreate, pass when loading checkpoint e.g.
         # FinetuneableZoobotTree.load_from_checkpoint(loc, encoder=encoder)
 
+        if greyscale:
+            timm_kwargs['in_chans'] = 1  # convert model to single channel version
+
         if name is not None:  # will load from Hub
             assert encoder is None, 'Cannot pass both name and encoder to use'
-            if 'greyscale' in name:
-                # I'm not sure why timm is happy to convert color model stem to greyscale 
-                # but doesn't correctly load greyscale model without this hack
-                logging.info('Loading greyscale model (auto-detected from name)')
-                timm_kwargs = {'in_chans': 1}
-            else:
-                timm_kwargs = {}
+            # if 'greyscale' in name:
+            #     # I'm not sure why timm is happy to convert color model stem to greyscale 
+            #     # but doesn't correctly load greyscale model without this hack
+            #     logging.info('Loading greyscale model (auto-detected from name)')
+            #     timm_kwargs = {'in_chans': 1}
+            # else:
+            #     timm_kwargs = {}
             self.encoder = timm.create_model(name, num_classes=0, pretrained=True, **timm_kwargs)
             self.encoder_dim = self.encoder.num_features
 
@@ -197,82 +202,82 @@ class FinetuneableZoobotAbstract(L.LightningModule):
 
         logging.info(f"Encoder architecture to finetune: {type(self.encoder)}")
 
-        params = []
-        params.append({"params": self.head.parameters(), "lr": self.learning_rate})  # head always trained
+        # params = []
+        # params.append({"params": self.head.parameters(), "lr": self.learning_rate})  # head always trained
 
-        if isinstance(self.encoder, timm.models.VisionTransformer):
-            tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
+        # if isinstance(self.encoder, timm.models.VisionTransformer):
+        #     tuneable_blocks = [self.encoder.patch_embed] + [stage for stage in self.encoder.blocks]
 
-        else:
-            raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
-               
-        # if self.training_mode == 'full':
-        # TODO temp
-        logging.info('training_mode is full, finetuning all blocks')
-        n_blocks = len(tuneable_blocks)
-
-        # take n blocks, ordered highest layer to lowest layer
-        tuneable_blocks.reverse()
-        logging.info(f"possible blocks to tune: {len(tuneable_blocks)}")
-
-        # will finetune all params in first N
-        logging.info(f"blocks that will be tuned: {n_blocks}")
-        blocks_to_tune = tuneable_blocks[: n_blocks]
-
-        # optionally, can finetune batchnorm params in remaining layers
-        remaining_blocks = tuneable_blocks[n_blocks :]
-        logging.info(f"Remaining blocks: {len(remaining_blocks)}")
-
-        assert not any(
-            [block in remaining_blocks for block in blocks_to_tune]
-        ), "Some blocks are in both tuneable and remaining"
-
-        # Append parameters of layers for finetuning along with decayed learning rate
-        for i, block in enumerate(blocks_to_tune):  # _ is the block name e.g. '3'
-            logging.info(f"Adding block {block} with lr {self.learning_rate * (self.layer_decay**i)}")
-            params.append({"params": block.parameters(), "learning_rate": self.learning_rate * (self.layer_decay**i)})
-
-        logging.info(f"param groups: {len(params)}")
-
-        optimizer = torch.optim.AdamW(
-            params, weight_decay=self.weight_decay
-        )  # lr included in params dict
-
-
-        # if hasattr(self.encoder, 'vit'):  # e.g. mae
-        #     logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
-        #     model_to_optimize = self.encoder.vit
         # else:
-        #     model_to_optimize = self.encoder
+        #     raise ValueError(f'Encoder architecture not automatically recognised: {type(self.encoder)}')
+               
+        # # if self.training_mode == 'full':
+        # # TODO temp
+        # logging.info('training_mode is full, finetuning all blocks')
+        # n_blocks = len(tuneable_blocks)
 
-        # if hasattr(model_to_optimize, 'pos_embed'):
-        #     logging.info("Encoder has pos_embed, will not train it")
-        #     model_to_optimize.pos_embed.requires_grad_(False)  # don't train pos_embed - typically, not a learnable parameter, despite timm defaults?
+        # # take n blocks, ordered highest layer to lowest layer
+        # tuneable_blocks.reverse()
+        # logging.info(f"possible blocks to tune: {len(tuneable_blocks)}")
 
-        # if self.training_mode == 'full':
-        #     logging.info("Training all parameters, not just the head")
-        #     optimizer = create_optimizer_v2(
-        #         model_to_optimize,
-        #         opt='adamw',
-        #         lr=self.learning_rate,
-        #         weight_decay=self.weight_decay,
-        #         layer_decay= self.layer_decay
-        #     )
-        #     # add head parameters to optimizer
-        #     optimizer.add_param_group({'params': self.head.parameters(), 'lr': self.learning_rate})
-        # elif self.training_mode == 'head_only':
-        #     logging.info("Training only the head, encoder frozen")
-        #     # freeze encoder
-        #     for param in self.encoder.parameters():
-        #         param.requires_grad = False
-        #     # freeze_batchnorm_layers(self.encoder)
-        #     optimizer = create_optimizer_v2(
-        #         self.head,
-        #         opt='adamw',
-        #         lr=self.learning_rate,
-        #         weight_decay=self.weight_decay,
-        #         layer_decay=None
-        #     )
+        # # will finetune all params in first N
+        # logging.info(f"blocks that will be tuned: {n_blocks}")
+        # blocks_to_tune = tuneable_blocks[: n_blocks]
+
+        # # optionally, can finetune batchnorm params in remaining layers
+        # remaining_blocks = tuneable_blocks[n_blocks :]
+        # logging.info(f"Remaining blocks: {len(remaining_blocks)}")
+
+        # assert not any(
+        #     [block in remaining_blocks for block in blocks_to_tune]
+        # ), "Some blocks are in both tuneable and remaining"
+
+        # # Append parameters of layers for finetuning along with decayed learning rate
+        # for i, block in enumerate(blocks_to_tune):  # _ is the block name e.g. '3'
+        #     logging.info(f"Adding block {block} with lr {self.learning_rate * (self.layer_decay**i)}")
+        #     params.append({"params": block.parameters(), "learning_rate": self.learning_rate * (self.layer_decay**i)})
+
+        # logging.info(f"param groups: {len(params)}")
+
+        # optimizer = torch.optim.AdamW(
+        #     params, weight_decay=self.weight_decay
+        # )  # lr included in params dict
+
+
+        if hasattr(self.encoder, 'vit'):  # e.g. mae
+            logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
+            model_to_optimize = self.encoder.vit
+        else:
+            model_to_optimize = self.encoder
+
+        if hasattr(model_to_optimize, 'pos_embed'):
+            logging.info("Encoder has pos_embed, will not train it")
+            model_to_optimize.pos_embed.requires_grad_(False)  # don't train pos_embed - typically, not a learnable parameter, despite timm defaults?
+
+        if self.training_mode == 'full':
+            logging.info("Training all parameters, not just the head")
+            optimizer = create_optimizer_v2(
+                model_to_optimize,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay= self.layer_decay
+            )
+            # add head parameters to optimizer
+            optimizer.add_param_group({'params': self.head.parameters(), 'lr': self.learning_rate})
+        elif self.training_mode == 'head_only':
+            logging.info("Training only the head, encoder frozen")
+            # freeze encoder
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            # freeze_batchnorm_layers(self.encoder)
+            optimizer = create_optimizer_v2(
+                self.head,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay=None
+            )
 
         logging.info("Optimizer ready")
 
