@@ -295,6 +295,10 @@ class FinetuneableZoobotAbstract(L.LightningModule):
             }
         else:
             logging.info("Learning rate scheduler not used")
+            logging.info("Manually applying lr_scale to optimizer param groups (because timm scheduler normally does this, but there is no scheduler)")
+            for group in optimizer.param_groups:
+                group['lr_scale'] = group.get('lr_scale', 1.0)
+                group['lr'] *= group['lr_scale']
             return optimizer
 
         # if self.cosine_schedule:

@@ -16,14 +16,37 @@ if __name__ == "__main__":
     # for group in param_groups:
     #     print(group['lr_scale'], group['weight_decay'], [p.size() for p in param_groups[3]['params']])
 
-    optimizer = create_optimizer_v2(encoder, 'adamw', lr=0.001, weight_decay=0.01)
-    print(len(optimizer.param_groups))
+    # higher layer_decay value causes SLOWER decay of learning rate
+    optimizer = create_optimizer_v2(encoder, 'adamw', lr=0.001, weight_decay=0.01, layer_decay=0.9)
+    # print(len(optimizer.param_groups))
 
     # add head parameters to optimizer
     optimizer.add_param_group({'params': head.parameters(), 'lr': 0.001})
-    print(len(optimizer.param_groups))
+    # print(len(optimizer.param_groups))
 
-    print(optimizer)  # Print the optimizer configuration
+    print('before manually applying lr_scale')
+    for group in optimizer.param_groups:
+        print('Group LR:', group['lr'], 'Group LR Scale:', group.get('lr_scale', None), 'Weight Decay:', group['weight_decay'])
 
-    scheduler = create_scheduler_v2(optimizer, 'cosine', warmup_epochs=5)
-    print(scheduler)  # Print the scheduler configuration
+    # lr_scale doesn't actually interact with the optimizer in timm, it's just a metadata field
+    # timm scheduler uses lr_scale to do value = value * lr_scale
+    # so if you have no scheduler, lr_scale has no effect
+    # so you need to manually apply value * lr_scale
+
+
+    for group in optimizer.param_groups:
+        group['lr_scale'] = group.get('lr_scale', 1.0)
+        group['lr'] *= group['lr_scale']
+    print('after manually applying lr_scale')
+    for group in optimizer.param_groups:
+        print('Group LR:', group['lr'], 'Group LR Scale:', group.get('lr_scale', None), 'Weight Decay:', group['weight_decay'])
+
+
+    
+    
+    
+
+    # print(optimizer)  # Print the optimizer configuration
+
+    # scheduler = create_scheduler_v2(optimizer, 'cosine', warmup_epochs=5)
+    # print(scheduler)  # Print the scheduler configuration
