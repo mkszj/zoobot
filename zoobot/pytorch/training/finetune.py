@@ -191,7 +191,7 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         and then pick the top self.n_blocks to finetune
 
         weight_decay is applied to both the head and (if relevant) the encoder
-        learning rate decay is applied to the encoder only: lr x (layer_decay^block_n), ignoring the head (block 0)
+        learning rate decay is applied to the encoder only: lr x (layer_decay^(max_layer - i), ignoring the head
 
         What counts as a "block" is a bit fuzzy, but I generally use the self.encoder.stages from timm. I also count the stem as a block.
 
