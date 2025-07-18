@@ -191,7 +191,7 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         and then pick the top self.n_blocks to finetune
 
         weight_decay is applied to both the head and (if relevant) the encoder
-        learning rate decay is applied to the encoder only: lr x (layer_decay^block_n), ignoring the head (block 0)
+        learning rate decay is applied to the encoder only: lr x (layer_decay^(max_layer - i), ignoring the head
 
         What counts as a "block" is a bit fuzzy, but I generally use the self.encoder.stages from timm. I also count the stem as a block.
 
@@ -295,6 +295,10 @@ class FinetuneableZoobotAbstract(L.LightningModule):
             }
         else:
             logging.info("Learning rate scheduler not used")
+            logging.info("Manually applying lr_scale to optimizer param groups (because timm scheduler normally does this, but there is no scheduler)")
+            for group in optimizer.param_groups:
+                group['lr_scale'] = group.get('lr_scale', 1.0)
+                group['lr'] *= group['lr_scale']
             return optimizer
 
 
