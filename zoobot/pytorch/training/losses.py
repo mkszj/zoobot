@@ -60,7 +60,7 @@ class CustomMultiQuestionLoss(torch.nn.Module):
             # additionally sum over questions, i.e. return a single loss value per galaxy
             return torch.sum(total_loss, dim=1)
         else:
-            # return a loss value per question, i.e. shape (num_questions,)
+            # return a loss value per question, i.e. shape (num_galaxies, num_questions)
             return total_loss
 
 

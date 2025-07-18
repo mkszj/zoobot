@@ -297,30 +297,6 @@ class FinetuneableZoobotAbstract(L.LightningModule):
             logging.info("Learning rate scheduler not used")
             return optimizer
 
-        # if self.cosine_schedule:
-        #     logging.info(
-        #         "Using lightly cosine schedule, warmup for {} epochs, max for {} epochs".format(
-        #             self.warmup_epochs, self.max_cosine_epochs
-        #         )
-        #     )
-        #     # from lightly.utils.scheduler import CosineWarmupScheduler  #copied from here to avoid dependency
-        #     # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
-        #     # Dictionary, with an "optimizer" key, and (optionally) a "lr_scheduler" key whose value is a single LR scheduler or lr_scheduler_config.
-        #     lr_scheduler = schedulers.CosineWarmupScheduler(
-        #         optimizer=opt,
-        #         warmup_epochs=self.warmup_epochs,
-        #         max_epochs=self.max_cosine_epochs,
-        #         start_value=self.learning_rate,
-        #         end_value=self.learning_rate * self.max_learning_rate_reduction_factor,
-        #     )
-
-            # logging.info('Using CosineAnnealingLR schedule, warmup not supported, max for {} epochs'.format(self.max_cosine_epochs))
-            # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            #     optimizer=opt,
-            #     T_max=self.max_cosine_epochs,
-            #     eta_min=self.learning_rate * self.max_learning_rate_reduction_factor
-            # )
-
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
