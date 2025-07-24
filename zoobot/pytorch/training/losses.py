@@ -7,6 +7,17 @@ import torch
 
 class CustomMultiQuestionLoss(torch.nn.Module):
     def __init__(self, question_answer_pairs: dict, question_functional_loss, careful=False, sum_over_questions=False):
+        """Custom loss function for multi-question tasks.
+
+        Args:
+            question_answer_pairs (dict): Mapping of questions to their answer keys. Each key is a question 
+                string and each value is a list of answer strings for that question.
+            question_functional_loss (callable): Functional loss to apply to each question. Should accept 
+                predictions and targets and return a loss tensor.
+            careful (bool, optional): **Deprecated**. No longer needed. Defaults to False.
+            sum_over_questions (bool, optional): If True, sum the losses over questions to return a single 
+                loss value per galaxy. If False, return a loss value per question. Defaults to False.
+        """
         super().__init__()
         self.question_answer_pairs = question_answer_pairs
         self.question_functional_loss = question_functional_loss
@@ -20,6 +31,19 @@ class CustomMultiQuestionLoss(torch.nn.Module):
 
 
     def forward(self, inputs: torch.Tensor, targets: dict) -> torch.Tensor:
+        """Compute the loss for multi-question predictions.
+
+        Args:
+            inputs (torch.Tensor): Prediction vector of shape (batch_size, num_answer_keys). 
+                Contains predicted fractions for all answer keys across all questions.
+            targets (dict): Dictionary with answer keys as keys and target values as values. 
+                Each value has shape (batch_size,) containing the target counts/votes.
+
+        Returns:
+            torch.Tensor: Loss tensor. If sum_over_questions is True, returns shape (batch_size,) 
+                with one loss value per galaxy. If False, returns shape (batch_size, num_questions) 
+                with one loss value per question per galaxy.
+        """
         # inputs, prediction vector, is B x N, where N is the number of answer keys (fractions). Might change to dictlike.
         # targets, labels from datamodule, is dictlike with keys of answer_keys, each with values of shape (B)
 
@@ -65,7 +89,7 @@ class CustomMultiQuestionLoss(torch.nn.Module):
 
 
 # inputs, targets format
-def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q):
+def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q) -> torch.Tensor:
     """
     Negative log likelihood of ``labels_for_q`` being drawn from Dirichlet-Multinomial distribution with ``concentrations_for_q`` concentrations.
     This loss is for one question. Sum over multiple questions if needed (assumes independent).
@@ -78,19 +102,6 @@ def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q):
     Returns:
         torch.Tensor: negative log. prob per galaxy, of shape (batch_dim).
     """
-    # total_count = torch.sum(labels_for_q, axis=1)
-    
-    # fails with
-    # ValueError: (tensor(0, device='cuda:0'), tensor([63.6014, 57.0941, 32.3332], device='cuda:0'), tensor([0, 0, 0], device='cuda:0', dtype=torch.int32))
-    # works with
-    # ValueError: (tensor(39), tensor([49.8713, 52.1925, 52.4133], grad_fn=<SelectBackward0>), tensor([21,  2, 16], dtype=torch.int32))
-
-    # raise ValueError(total_count[0], concentrations_for_q[0], labels_for_q[0])  # debug
-
-    # raise ValueError(total_count.shape, concentrations_for_q.shape, labels_for_q.shape)
-    # works with (torch.Size([32]), torch.Size([32, 3]), torch.Size([32, 3])) via zoobot tests
-    # fails with (torch.Size([64]), torch.Size([64, 3]), torch.Size([64, 3])) via foundation?
-    # ValueError: shape mismatch: objects cannot be broadcast to a single shape: torch.Size([64, 3]) vs torch.Size([64])
     # https://docs.pyro.ai/en/stable/distributions.html#dirichletmultinomial
     # .int()s avoid rounding errors causing loss of around 1e-5 for questions with 0 votes
     # dist = pyro.distributions.DirichletMultinomial(
@@ -98,9 +109,7 @@ def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q):
     #     concentration=concentrations_for_q, 
     #     is_sparse=False, validate_args=True
     # )
-
     # dirichlet_neg_log_prob = -dist.log_prob(labels_for_q.int())  # important minus sign
-
     # print(f"concentrations_for_q: {concentrations_for_q.shape}, labels_for_q: {labels_for_q.shape}")
 
 
@@ -111,8 +120,30 @@ def get_dirichlet_neg_log_prob(concentrations_for_q, labels_for_q):
 
 # https://docs.pyro.ai/en/stable/_modules/pyro/distributions/conjugate.html#DirichletMultinomial
 
-def log_prob(alpha, value):
+def log_prob(alpha, value) -> torch.Tensor:
+    """Compute log probability for Dirichlet-Multinomial distribution.
+    
+    Manual implementation equivalent to pyro.distributions.DirichletMultinomial.log_prob()
+    to remove pyro dependency.
+    
+    Args:
+        alpha (torch.Tensor): Concentration parameters of shape (batch, categories).
+        value (torch.Tensor): Observed counts of shape (batch, categories).
+        
+    Returns:
+        torch.Tensor: Log probability of shape (batch,).
+    """
     return _log_beta_1(alpha.sum(-1), value.sum(-1)) - _log_beta_1(alpha, value).sum(-1)
 
-def _log_beta_1(alpha, value):
+def _log_beta_1(alpha, value) -> torch.Tensor:
+    """Helper function to compute log beta function for Dirichlet-Multinomial.
+    
+    Args:
+        alpha (torch.Tensor): Concentration parameters.
+        value (torch.Tensor): Observed counts.
+        
+    Returns:
+        torch.Tensor: Log beta function values.
+    """
     return torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
+

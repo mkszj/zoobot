@@ -1,10 +1,11 @@
 <!-- https://www.sphinx-doc.org/en/master/usage/installation.html -->
 conda install sphinx
+pip install sphinxemoji furo
 
 <!-- local build -->
 <!-- https://www.sphinx-doc.org/en/master/usage/quickstart.html -->
 
-sudo apt install make 
+sudo apt install make
 
 cd docs
 make html

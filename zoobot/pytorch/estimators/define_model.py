@@ -208,15 +208,25 @@ class ZoobotTree(GenericLightningModule):
     PyTorch LightningModule describing how to train the encoder and head (described below).
     Trains using Dirichlet loss. Labels should be num. volunteers giving each answer to each question.
 
+    Most Zoobot users won't use this training code directly - you probably just want the pretrained model for finetuning. 
+    I will likely continue splitting the pretraining into other repos, and leave Zoobot for finetuning. But it's here as a reference.
+
     See the code for exact training step, logging, etc - there's a lot of detail.
 
     Args:
         output_dim (int): Output dimension of model's head e.g. 34 for predicting a 34-answer decision tree.
-        architecture_name (str, optional): Architecture to use. Passed to timm. Must be in timm.list_models(). Defaults to "efficientnet_b0".
-        channels (int, optional): Num. input channels. Probably 3 or 1. Defaults to 1.
-        test_time_dropout (bool, optional): Apply dropout at test time, to pretend to be Bayesian. Defaults to True.
+        question_answer_pairs (dict, optional): Dictionary mapping questions to answers, e.g. {'smooth-or-featured': ['smooth', 'featured'], ...}. See schemas.py. Defaults to None.
+        dependencies (dict, optional): Dictionary mapping questions to their dependencies, e.g. {'disk-edge-on': 'smooth-or-featured_featured'}. See schemas.py Defaults to None.
+        architecture_name (str, optional): Architecture to use. Passed to timm. Must be in timm.list_models(). Defaults to "convnext_nano".
+        channels (int, optional): Num. input channels. Probably 3 or 1. Defaults to 3.
+        test_time_dropout (bool, optional): Apply dropout at test time, to pretend to be Bayesian. Defaults to False.
+        compile_encoder (bool, optional): Compile the encoder with torch.compile. Defaults to False.
         timm_kwargs (dict, optional): passed to timm.create_model e.g. drop_path_rate=0.2 for effnet. Defaults to {}.
-        learning_rate (float, optional): AdamW learning rate. Defaults to 1e-3.
+        dropout_rate (float, optional): Dropout rate for the head. Defaults to 0.2.
+        learning_rate (float, optional): Learning rate for AdamW. Defaults to 1e-3.
+        betas (tuple, optional): AdamW betas. Defaults to (0.9, 0.999).
+        weight_decay (float, optional): AdamW weight decay. Defaults to 0.01.
+        scheduler_params (dict, optional): kwargs to pass to the scheduler. If empty, no scheduler is used. Defaults to {}.
     """
 
     # lightning only supports checkpoint loading / hparams which are not fancy classes
@@ -225,18 +235,12 @@ class ZoobotTree(GenericLightningModule):
     def __init__(
         self,
         output_dim: int,
-        # in the simplest case, this is all zoobot needs: grouping of label col indices as questions
-        # question_index_groups: List=None,
-        # BUT
-        # if you pass these, it enables better per-question and per-survey logging (because we have names)
-        # must be passed as simple dicts, not objects, so can't just pass schema in
         question_answer_pairs: dict = None,
         dependencies: dict = None,
         # encoder args
-        architecture_name="efficientnet_b0",
-        channels=1,
-        # use_imagenet_weights=False,
-        test_time_dropout=True,
+        architecture_name="convnext_nano",
+        channels=3,
+        test_time_dropout=False,
         compile_encoder=False,
         timm_kwargs={},  # passed to timm.create_model e.g. drop_path_rate=0.2 for effnet
         # head args
@@ -447,39 +451,24 @@ def get_encoder_dim(encoder, channels=3):
 
 
 def get_pytorch_encoder(
-    architecture_name="efficientnet_b0",
-    channels=1,
-    # use_imagenet_weights=False,
+    architecture_name="convnext_nano",
+    channels=3,
     **timm_kwargs,
 ) -> nn.Module:
     """
-    Create a trainable efficientnet model.
-    First layers are galaxy-appropriate augmentation layers - see :meth:`zoobot.estimators.define_model.add_augmentation_layers`.
-    Expects single channel image e.g. (300, 300, 1), likely with leading batch dimension.
-
-    Optionally (by default) include the head (output layers) used for GZ DECaLS.
-    Specifically, global average pooling followed by a dense layer suitable for predicting dirichlet parameters.
-    See ``efficientnet_custom.custom_top_dirichlet``
+    Create a trainable timm model (convnext_nano by default).
+    Wrapper for timm.create_model.
 
     Args:
-        output_dim (int): Dimension of head dense layer. No effect when include_top=False.
-        input_size (int): Length of initial image e.g. 300 (asmeaned square)
-        crop_size (int): Length to randomly crop image. See :meth:`zoobot.estimators.define_model.add_augmentation_layers`.
-        resize_size (int): Length to resize image. See :meth:`zoobot.estimators.define_model.add_augmentation_layers`.
-        weights_loc (str, optional): If str, load weights from efficientnet checkpoint at this location. Defaults to None.
-        include_top (bool, optional): If True, include head used for GZ DECaLS: global pooling and dense layer. Defaults to True.
-        expect_partial (bool, optional): If True, do not raise partial match error when loading weights (likely for optimizer state). Defaults to False.
-        channels (int, default 1): Number of channels i.e. C in NHWC-dimension inputs.
+        architecture_name (str): Name of the timm architecture to use.
+        channels (int): Number of input channels (e.g. 3 for RGB images).
+        **timm_kwargs: Additional keyword arguments to pass to timm.create_model.
 
     Returns:
-        torch.nn.Sequential: trainable efficientnet model including augmentations and optional head
+        nn.Module: A timm PyTorch model with the specified architecture and input channels.
     """
     # num_classes=0 gives pooled encoder
     # https://github.com/rwightman/pytorch-image-models/blob/main/timm/models/efficientnet.py
-
-    # if architecture_name == 'toy':
-    #     logging.warning('Using toy encoder')
-    #     return ToyEncoder()
 
     # support older code that didn't specify effnet version
     if architecture_name == "efficientnet":
@@ -493,7 +482,10 @@ def get_pytorch_encoder(
 
 
 def get_pytorch_dirichlet_head(
-    encoder_dim: int, output_dim: int, test_time_dropout: bool, dropout_rate: float
+    encoder_dim: int, 
+    output_dim: int, 
+    test_time_dropout: bool, 
+    dropout_rate: float
 ) -> torch.nn.Sequential:
     """
     Head to combine with encoder (above) when predicting Galaxy Zoo decision tree answers.
