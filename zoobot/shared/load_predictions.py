@@ -42,6 +42,8 @@ def load_hdf5s(hdf5_locs: List):
     for loc in hdf5_locs:
         try:
             with h5py.File(loc, 'r') as f:
+                    
+                    assert os.path.exists(loc), 'HDF5 file {} does not exist'.format(loc)
 
                     logging.debug(f.keys())
                     these_predictions = f['predictions'][:]

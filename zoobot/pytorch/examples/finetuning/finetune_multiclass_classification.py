@@ -7,6 +7,8 @@ from zoobot.pytorch.training import finetune
 from galaxy_datasets import galaxy_mnist
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
+from galaxy_datasets.transforms import default_view_config, minimal_view_config, get_galaxy_transform
+
 
 if __name__ == '__main__':
 
@@ -18,6 +20,7 @@ if __name__ == '__main__':
     num_workers= 8
     n_blocks = 1  # EffnetB0 is divided into 7 blocks. set 0 to only fit the head weights. Set 1, 2, etc to finetune deeper. 
     max_epochs = 1  #  6 epochs should get you ~93% accuracy. Set much higher (e.g. 1000) for harder problems, to use Zoobot's default early stopping. 
+    output_size = 128
     # the remaining key parameters for high accuracy are weight_decay, learning_rate, and lr_decay. You might like to tinker with these.
 
     # load in catalogs of images and labels to finetune on
@@ -32,16 +35,22 @@ if __name__ == '__main__':
     # Here, it's a single column, 'label', with values 0-3 (for each of the 4 classes)
     label_cols = ['label']
     num_classes = 4
-  
-    # load a pretrained checkpoint saved here
-    checkpoint_loc = os.path.join(zoobot_dir, 'data/pretrained_models/pytorch/effnetb0_greyscale_224px.ckpt')
     
     # save the finetuning results here
-    save_dir = os.path.join(zoobot_dir, 'results/pytorch/finetune/finetune_multiclass_classification')
+    save_dir = os.path.join(zoobot_dir, 'results/finetune_multiclass_classification')
 
+    train_transform_cfg = default_view_config()
+    test_transform_cfg = minimal_view_config()
+    train_transform_cfg.output_size = output_size
+    test_transform_cfg.output_size = output_size
+    train_transform = get_galaxy_transform(train_transform_cfg)
+    test_transform = get_galaxy_transform(test_transform_cfg)
+  
     datamodule = CatalogDataModule(
       label_cols=label_cols,
       catalog=train_catalog,  # very small, as a demo
+      train_transform=train_transform,
+      test_transform=test_transform,
       batch_size=batch_size,  # increase for faster training, decrease to avoid out-of-memory errors
       num_workers=num_workers  # TODO set to a little less than num. CPUs
     )
@@ -54,9 +63,9 @@ if __name__ == '__main__':
 
   
     model = finetune.FinetuneableZoobotClassifier(
-      checkpoint_loc=checkpoint_loc,
+      name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano',
       num_classes=num_classes,
-      n_blocks=n_blocks
+      training_mode="full"
     )
     # under the hood, this does:
     # encoder = finetune.load_pretrained_encoder(checkpoint_loc)
@@ -82,7 +91,7 @@ if __name__ == '__main__':
     predict_on_catalog.predict(
       test_catalog,
       finetuned_model,
-      n_samples=1,
+      inference_transform=test_transform,
       label_cols=['class_{}'.format(n) for n in range(num_classes)],  # TODO feel free to rename, it's just for the csv header
       save_loc=predictions_save_loc,
       trainer_kwargs={'accelerator': 'auto'},

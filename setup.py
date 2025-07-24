@@ -20,7 +20,7 @@ setuptools.setup(
         "Environment :: GPU :: NVIDIA CUDA"
     ],
     packages=setuptools.find_packages(),
-    python_requires=">=3.10",  # bumped to 3.10 for typing
+    python_requires=">=3.9",
 
     # fiddly
     # extras_require={'foo': ['bar']},  # for testing only
@@ -45,6 +45,7 @@ setuptools.setup(
             'torchaudio',
             'torchmetrics',
             'lightning >= 2.2.5',
+            'litmodels',
             'pyro-ppl >= 1.8.6',
             'timm >= 1.0.15'
         ],

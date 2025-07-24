@@ -8,11 +8,13 @@ import torch
 import torchvision
 import lightning as L
 
-from zoobot.shared import save_predictions
+from torchvision.transforms.v2 import Compose
+
+# from zoobot.shared import save_predictions
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
-def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: torchvision.transforms.Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
+def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
@@ -61,8 +63,6 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, labe
     # trainer.predict gives list of tensors, each tensor being predictions for a batch. Concat on axis 0.
     # range(n_samples) list comprehension repeats this, for dropout-permuted predictions. Stack to create new last axis.
     # final shape (n_galaxies, label_cols)
-
-    tmp = trainer.predict(model, predict_datamodule)
 
     predictions: torch.Tensor = torch.cat(trainer.predict(model, predict_datamodule), dim=0)  # in latest version, now a tensor
     logging.info('Predictions complete - {}'.format(predictions.shape))
