@@ -2,7 +2,7 @@ from typing import Tuple
 import logging
 
 import torch
-import pyro
+# import pyro
 
 
 class CustomMultiQuestionLoss(torch.nn.Module):

@@ -52,7 +52,7 @@ setuptools.setup(
         'pytorch-colab': [
             # colab includes everything else pytorch-y already
             # (and reinstalling it will cause problems)
-            'pyro-ppl>=1.8.6'
+            'lightning >= 2.2.5'
         ],
 
         # TODO may add narval/Digital Research Canada config
