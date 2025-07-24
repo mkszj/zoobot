@@ -28,7 +28,7 @@ def train_default_zoobot_from_scratch(
     # specify either one transform_cfg for both train and test/inference, or two separate ones
     transform_cfg=None,
     train_transform_cfg=None,
-    inference_transform_cfg=None,
+    test_transform_cfg=None,
     # input data - specify *either* catalog (to be split) or the splits themselves
     catalog=None,
     train_catalog=None,
@@ -136,21 +136,21 @@ def train_default_zoobot_from_scratch(
     # if user only passed one transform_cfg, use it for both train and inference
     if transform_cfg is not None:
         assert train_transform_cfg is None
-        assert inference_transform_cfg is None
+        assert test_transform_cfg is None
         train_transform_cfg = transform_cfg
-        inference_transform_cfg = transform_cfg
+        test_transform_cfg = transform_cfg
     # if user passed two transform_cfgs, use them separately
     else:
         assert train_transform_cfg is not None
-        assert inference_transform_cfg is not None
+        assert test_transform_cfg is not None
 
     logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
-    logging.info(f'Using inference_transform_cfg: {inference_transform_cfg}')
+    logging.info(f'Using test_transform_cfg: {test_transform_cfg}')
 
     # same transforms regardless of images or webdataset
     # GalaxyViewTransform is my custom class for making transforms, and includes .transform to get the T.Compose object
     train_transform = transforms.get_galaxy_transform(train_transform_cfg)
-    inference_transform = transforms.get_galaxy_transform(inference_transform_cfg)
+    test_transform = transforms.get_galaxy_transform(test_transform_cfg)
 
     strategy = 'auto'
     plugins = None
@@ -216,7 +216,7 @@ def train_default_zoobot_from_scratch(
             # 'crop_ratio_bounds': crop_ratio_bounds,
             # 'resize_after_crop': resize_after_crop,
             'train_transform_cfg': train_transform_cfg,
-            'inference_transform_cfg': inference_transform_cfg,
+            'test_transform_cfg': test_transform_cfg,
             'num_workers': num_workers,
             'prefetch_factor': prefetch_factor,
             'framework': 'pytorch'
@@ -249,7 +249,8 @@ def train_default_zoobot_from_scratch(
             # can take either a catalog (and split it), or a pre-split catalog
             **data_to_use,
             # augmentations parameters, now using torchvision
-            requested_transform=(train_transform, inference_transform),
+            train_transform=train_transform,
+            test_transform=test_transform,
             # hardware parameters
             batch_size=batch_size, # on 2xA100s, 256 with DDP, 512 with distributed (i.e. split batch)
             num_workers=num_workers,
@@ -272,7 +273,7 @@ def train_default_zoobot_from_scratch(
             prefetch_factor=prefetch_factor,
             cache_dir=cache_dir,
             train_transform=train_transform,
-            inference_transform=inference_transform
+            inference_transform=test_transform
         )
 
     # debug - check range of loaded images, should be 0-1

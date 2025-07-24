@@ -12,16 +12,15 @@ from zoobot.shared import save_predictions
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
-def predict(catalog: pd.DataFrame, model: L.LightningModule, n_samples: int, label_cols: Union[List, None], save_loc: str, inference_transform: torchvision.transforms.Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
+def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: torchvision.transforms.Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
     Args:
         catalog (pd.DataFrame): catalog of galaxies to make predictions on. Must include `file_loc` and `id_str` columns.
         model (L.LightningModule): with which to make predictions. Probably ZoobotTree, FinetuneableZoobotClassifier, FinetuneableZoobotTree, or ZoobotEncoder.
-        n_samples (int): num. of forward passes to make per galaxy. Useful to marginalise over augmentations/test-time dropout.
-        label_cols (List): Names for prediction columns. Only for your convenience - has no effect on predictions.
         save_loc (str): desired name of file recording the predictions
+        label_cols (List[str]): columns in the catalog to use as labels. Used to name the output columns.
         datamodule_kwargs (dict, optional): Passed to CatalogDataModule. Use to e.g. add custom augmentations. Defaults to {}.
         trainer_kwargs (dict, optional): Passed to L.Trainer. Defaults to {}.
     """
@@ -31,7 +30,7 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, n_samples: int, lab
     predict_datamodule = CatalogDataModule(
         label_cols=None,  # not using label_cols to load labels, we're only using it to name our predictions
         predict_catalog=catalog,  # no need to specify the other catalogs
-        requested_transform=inference_transform,  # see galaxy-datasets, e.g. torchvision.transforms.Compose([torchvision.transforms.Resize((224, 224)), torchvision.transforms.ToTensor()])
+        test_transform=inference_transform,  # see galaxy-datasets, e.g. torchvision.transforms.Compose([torchvision.transforms.Resize((224, 224)), torchvision.transforms.ToTensor()])
         **datamodule_kwargs  # e.g. batch_size, num_workers, etc
     )
     # with this stage arg, will only use predict_catalog 
@@ -53,8 +52,6 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, n_samples: int, lab
         **trainer_kwargs  # e.g. gpus
     )
 
-    # from here, very similar to tensorflow version - could potentially refactor
-
     logging.info('Beginning predictions')
     start = datetime.datetime.fromtimestamp(time.time())
     logging.info('Starting at: {}'.format(start.strftime('%Y-%m-%d %H:%M:%S')))
@@ -63,14 +60,18 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, n_samples: int, lab
 
     # trainer.predict gives list of tensors, each tensor being predictions for a batch. Concat on axis 0.
     # range(n_samples) list comprehension repeats this, for dropout-permuted predictions. Stack to create new last axis.
-    # final shape (n_galaxies, n_answers, n_samples)
-    predictions: pd.DataFrame = pd.concat(trainer.predict(model, predict_datamodule), axis=0)  # in latest version, now a dataframe
+    # final shape (n_galaxies, label_cols)
 
+    tmp = trainer.predict(model, predict_datamodule)
+
+    predictions: torch.Tensor = torch.cat(trainer.predict(model, predict_datamodule), dim=0)  # in latest version, now a tensor
     logging.info('Predictions complete - {}'.format(predictions.shape))
-
+    
     logging.info(f'Saving predictions to {save_loc}')
-
-    predictions.to_csv(save_loc, index=False)  # RegressionBaseline returns pandas dataframe, do I want this, or hdf5?
+    # predictions: pd.DataFrame = pd.concat(trainer.predict(model, predict_datamodule), axis=0)  # in latest version, now a dataframe
+    prediction_df = pd.DataFrame(predictions.numpy(), columns=label_cols)  # convert to pandas dataframe
+    prediction_df['id_str'] = image_id_strs  # add the id_str column
+    prediction_df.to_csv(save_loc, index=False)  # RegressionBaseline returns pandas dataframe, do I want this, or hdf5?
     # probably just dataframe, since I only load to dataframe next anyway, and I never used repeated draws
 
     # if save_loc.endswith('.csv'):      # save as pandas df
