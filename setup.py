@@ -20,7 +20,7 @@ setuptools.setup(
         "Environment :: GPU :: NVIDIA CUDA"
     ],
     packages=setuptools.find_packages(),
-    python_requires=">=3.9",  # bumped to 3.9 for typing
+    python_requires=">=3.10",  # bumped to 3.10 for typing
 
     # fiddly
     # extras_require={'foo': ['bar']},  # for testing only
