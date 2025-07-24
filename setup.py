@@ -142,6 +142,6 @@ setuptools.setup(
         'webdataset',  # for reading webdataset files
         'huggingface_hub',  # login may be required
         'setuptools',  # no longer pinned
-        'galaxy-datasets>=0.0.24'  # for dataset loading (see github/mwalmsley/galaxy-datasets)
+        'galaxy-datasets>=0.0.25'  # for dataset loading (see github/mwalmsley/galaxy-datasets)
     ]
 )

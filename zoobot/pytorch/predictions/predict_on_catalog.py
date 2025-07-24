@@ -14,7 +14,7 @@ from torchvision.transforms.v2 import Compose
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
-def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: Compose, datamodule_kwargs={}, trainer_kwargs={}) -> None:
+def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: Compose, datamodule_kwargs={}, trainer_kwargs={}) -> pd.DataFrame:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
@@ -88,4 +88,4 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, labe
     logging.info('Completed at: {}'.format(end.strftime('%Y-%m-%d %H:%M:%S')))
     logging.info('Time elapsed: {}'.format(end - start))
 
-    return predictions
+    return prediction_df
