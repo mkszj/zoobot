@@ -52,6 +52,12 @@ def test_finetune_classifier(tmp_path, catalogs, greyscale, training_mode):
         batch_size=32,  # small batch size because our gpu has limited memory
         num_workers=2,  # sets the parallelism for loading data. 2 works well on colab.
     )
+    datamodule.setup(stage='fit')  # setup the datamodule for training
+    for batch in datamodule.train_dataloader():
+        if greyscale:
+            assert batch['image'].shape == (32, 1, 64, 64)
+        else:
+            assert batch['image'].shape == (32, 3, 64, 64)
 
     model = FinetuneableZoobotClassifier(
         # arguments for any FinetuneableZoobot class
@@ -63,7 +69,7 @@ def test_finetune_classifier(tmp_path, catalogs, greyscale, training_mode):
         # arguments specific to FinetuneableZoobotClassifier
         num_classes=2,
         label_col='ring',
-        greyscale=greyscale,  # convert the model to single channel version
+        greyscale=greyscale  # convert the model to single channel version
     )
 
     save_dir = tmp_path / 'finetune_binary_classification'

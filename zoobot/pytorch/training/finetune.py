@@ -111,6 +111,7 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         # FinetuneableZoobotTree.load_from_checkpoint(loc, encoder=encoder)
 
         if greyscale:
+            logging.warning('Converting encoder to single channel version')
             timm_kwargs['in_chans'] = 1  # convert model to single channel version
 
         if name is not None:  # will load from Hub
