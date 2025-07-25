@@ -26,6 +26,9 @@ def catalogs(tmp_path):
 
     test_catalog, _ = demo_rings(root=data_dir, download=True, train=False)
 
+    train_catalog['ring'] = train_catalog['ring'].astype(int)
+    test_catalog['ring'] = test_catalog['ring'].astype(int)
+
     return train_catalog, test_catalog
 
 # @pytest.fixture(params=[True, False])
