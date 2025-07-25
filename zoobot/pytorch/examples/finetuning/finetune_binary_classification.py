@@ -30,12 +30,15 @@ if __name__ == '__main__':
     label_cols = ['ring']
     # For binary classification, the label column should have binary (0 or 1) labels for your classes
     # To support more complicated labels, Zoobot expects a list of columns. A list with one element works fine.
+
+    greyscale = True
    
     # save the finetuning results here
     save_dir = 'results/finetune_binary_classification'
 
     transform_cfg = default_view_config()
     transform_cfg.output_size = 128  # set to the size you want your images to be resized to
+    transform_cfg.greyscale = greyscale
     transform = get_galaxy_transform(transform_cfg)
 
     datamodule = CatalogDataModule(
@@ -56,7 +59,8 @@ if __name__ == '__main__':
       name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano',
       num_classes=2,
       training_mode='head_only',
-      label_col='ring'
+      label_col='ring',
+      greyscale=greyscale
     )
     # under the hood, this does:
     # encoder = finetune.load_pretrained_encoder(checkpoint_loc)

@@ -116,13 +116,6 @@ class FinetuneableZoobotAbstract(L.LightningModule):
 
         if name is not None:  # will load from Hub
             assert encoder is None, 'Cannot pass both name and encoder to use'
-            # if 'greyscale' in name:
-            #     # I'm not sure why timm is happy to convert color model stem to greyscale 
-            #     # but doesn't correctly load greyscale model without this hack
-            #     logging.info('Loading greyscale model (auto-detected from name)')
-            #     timm_kwargs = {'in_chans': 1}
-            # else:
-            #     timm_kwargs = {}
             self.encoder = timm.create_model(name, num_classes=0, pretrained=True, **timm_kwargs)
             self.encoder_dim: int = self.encoder.num_features
 
@@ -155,8 +148,6 @@ class FinetuneableZoobotAbstract(L.LightningModule):
         self.head_dropout_prob = head_dropout_prob
 
         self.scheduler_kwargs = scheduler_kwargs
-
-        # self.from_scratch = from_scratch
 
         self.train_loss_metric = tm.MeanMetric()
         self.val_loss_metric = tm.MeanMetric()
