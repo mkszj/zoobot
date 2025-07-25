@@ -46,7 +46,6 @@ setuptools.setup(
             'torchmetrics',
             'lightning >= 2.2.5',
             'litmodels',
-            'pyro-ppl >= 1.8.6',
             'timm >= 1.0.15'
         ],
 
