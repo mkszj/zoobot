@@ -30,7 +30,7 @@ import os
 #         # MASTER_PORT will override
 
 
-from pytorch_lightning.plugins.environments import SLURMEnvironment
+from lightning.pytorch.plugins.environments import SLURMEnvironment
 class GalahadEnvironment(SLURMEnvironment):
     def __init__(self, **kwargs):
         ntasks_per_node = os.environ["SLURM_TASKS_PER_NODE"].split("(")[0]

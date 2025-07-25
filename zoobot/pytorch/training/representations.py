@@ -1,10 +1,10 @@
 import logging
-import pytorch_lightning as pl
+import lightning as L
 
 from timm import create_model
 
 
-class ZoobotEncoder(pl.LightningModule):
+class ZoobotEncoder(L.LightningModule):
 
     def __init__(self, encoder):
         super().__init__()

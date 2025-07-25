@@ -3,24 +3,32 @@ import os
 from typing import Tuple
 
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.plugins import TorchSyncBatchNorm
-from pytorch_lightning.strategies.ddp import DDPStrategy
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import CSVLogger
+import lightning as L
+from lightning.pytorch.plugins import TorchSyncBatchNorm
+from lightning.pytorch.strategies.ddp import DDPStrategy
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.loggers import CSVLogger
 
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
+from galaxy_datasets.pytorch.webdatamodule import WebDataModule
+from galaxy_datasets import transforms
 
 from zoobot.pytorch.estimators import define_model
-from zoobot.pytorch.datasets import webdatamodule
+from zoobot.shared import save_predictions
+from zoobot.shared.schemas import Schema
 
-
+from omegaconf import OmegaConf
 
 def train_default_zoobot_from_scratch(    
     # absolutely crucial arguments
     save_dir: str,  # save model here
-    schema,  # answer these questions
+    schema: Schema,  # answer these questions
+    # augmentation parameters are required, see github/mwalmsley/galaxy-datasets
+    # specify either one transform_cfg for both train and test/inference, or two separate ones
+    transform_cfg=None,
+    train_transform_cfg=None,
+    test_transform_cfg=None,
     # input data - specify *either* catalog (to be split) or the splits themselves
     catalog=None,
     train_catalog=None,
@@ -42,14 +50,11 @@ def train_default_zoobot_from_scratch(
     betas=(0.9, 0.999),
     weight_decay=0.01,
     scheduler_params={},
-    # data and augmentation parameters
-    color=False,
-    resize_after_crop=224,
-    crop_scale_bounds=(0.7, 0.8),
-    crop_ratio_bounds=(0.9, 1.1),
+    # data 
     # hardware parameters
     nodes=1,
     gpus=2,
+    accumulate_gradients=1,
     sync_batchnorm=False,
     num_workers=4,
     prefetch_factor=4,
@@ -63,7 +68,7 @@ def train_default_zoobot_from_scratch(
     extra_callbacks=None,
     # replication parameters
     random_state=42
-) -> Tuple[define_model.ZoobotTree, pl.Trainer]:
+) -> Tuple[define_model.ZoobotTree, L.Trainer]:
     """
     Train Zoobot from scratch on a big galaxy catalog.
 
@@ -103,7 +108,7 @@ def train_default_zoobot_from_scratch(
         prefetch_factor (int, optional): Num. batches to queue in memory per dataloader. See torch dataloader docs. Defaults to 4.
         mixed_precision (bool, optional): Use (mostly) half-precision to halve memory requirements. May cause instability. See Lightning Trainer docs. Defaults to False.
         compile_encoder (bool, optional): Compile the encoder with torch.compile (new in torch v2). Defaults to False.
-        wandb_logger (pl.loggers.wandb.WandbLogger, optional): Logger to track experiments on Weights and Biases. Defaults to None.
+        wandb_logger (L.pytorch.loggers.wandb.WandbLogger, optional): Logger to track experiments on Weights and Biases. Defaults to None.
         checkpoint_file_template (str, optional): formatting for checkpoint filename. See Lightning docs. Defaults to None.
         auto_insert_metric_name (bool, optional): escape "/" in metric names when naming checkpoints. See Lightning docs. Defaults to True.
         save_top_k (int, optional): Keep the k best checkpoints. See Lightning docs. Defaults to 3.
@@ -111,14 +116,14 @@ def train_default_zoobot_from_scratch(
         random_state (int, optional): Seed. Defaults to 42.
 
     Returns:
-        Tuple[define_model.ZoobotTree, pl.Trainer]: Trained ZoobotTree model, and Trainer with which it was trained.
+        Tuple[define_model.ZoobotTree, L.Trainer]: Trained ZoobotTree model, and Trainer with which it was trained.
     """
-
+    logging.info('home within Zoobot: {}'.format(os.getenv('HOME')))
     # some optional logging.debug calls recording cluster environment
     slurm_debugging_logs()
 
     # redundant when already called before this, but no harm doing twice
-    pl.seed_everything(random_state)
+    L.seed_everything(random_state)
 
     assert save_dir is not None
     if not os.path.isdir(save_dir):
@@ -128,13 +133,24 @@ def train_default_zoobot_from_scratch(
             pass # another gpu process may have just made it
     logging.info(f'Saving to {save_dir}')
 
-    if color:
-        logging.warning(
-            'Training on color images, not converting to greyscale')
-        channels = 3
+    # if user only passed one transform_cfg, use it for both train and inference
+    if transform_cfg is not None:
+        assert train_transform_cfg is None
+        assert test_transform_cfg is None
+        train_transform_cfg = transform_cfg
+        test_transform_cfg = transform_cfg
+    # if user passed two transform_cfgs, use them separately
     else:
-        logging.info('Converting images to greyscale before training')
-        channels = 1
+        assert train_transform_cfg is not None
+        assert test_transform_cfg is not None
+
+    logging.info(f'Using train_transform_cfg: {train_transform_cfg}')
+    logging.info(f'Using test_transform_cfg: {test_transform_cfg}')
+
+    # same transforms regardless of images or webdataset
+    # GalaxyViewTransform is my custom class for making transforms, and includes .transform to get the T.Compose object
+    train_transform = transforms.get_galaxy_transform(train_transform_cfg)
+    test_transform = transforms.get_galaxy_transform(test_transform_cfg)
 
     strategy = 'auto'
     plugins = None
@@ -195,10 +211,12 @@ def train_default_zoobot_from_scratch(
             'nodes': nodes,
             'precision': precision,
             'batch_size': batch_size,
-            'greyscale': not color,
-            'crop_scale_bounds': crop_scale_bounds,
-            'crop_ratio_bounds': crop_ratio_bounds,
-            'resize_after_crop': resize_after_crop,
+            # 'greyscale': not color,
+            # 'crop_scale_bounds': crop_scale_bounds,
+            # 'crop_ratio_bounds': crop_ratio_bounds,
+            # 'resize_after_crop': resize_after_crop,
+            'train_transform_cfg': train_transform_cfg,
+            'test_transform_cfg': test_transform_cfg,
             'num_workers': num_workers,
             'prefetch_factor': prefetch_factor,
             'framework': 'pytorch'
@@ -213,7 +231,7 @@ def train_default_zoobot_from_scratch(
     webdatasets = train_urls is not None
 
     if single_catalog or split_catalogs:
-        # this branch will use GalaxyDataModule to load catalogs
+        # this branch will use CatalogDataModule to load catalogs
         assert not webdatasets
         if single_catalog:
             assert not split_catalogs
@@ -226,59 +244,54 @@ def train_default_zoobot_from_scratch(
                 'val_catalog': val_catalog,
                 'test_catalog': test_catalog  # may be None
             }
-        datamodule = GalaxyDataModule(
+        datamodule = CatalogDataModule(
             label_cols=schema.label_cols,
             # can take either a catalog (and split it), or a pre-split catalog
             **data_to_use,
-            # augmentations parameters
-            greyscale=not color,
-            crop_scale_bounds=crop_scale_bounds,
-            crop_ratio_bounds=crop_ratio_bounds,
-            resize_after_crop=resize_after_crop,
+            # augmentations parameters, now using torchvision
+            train_transform=train_transform,
+            test_transform=test_transform,
             # hardware parameters
             batch_size=batch_size, # on 2xA100s, 256 with DDP, 512 with distributed (i.e. split batch)
             num_workers=num_workers,
             prefetch_factor=prefetch_factor
         )
     else:
+        assert webdatasets  # train_urls is not None
         # this branch will use WebDataModule to load premade webdatasets
+        # will use new torchvision transforms         
 
-        # temporary: use SSL-like transform
-        # from foundation.models import transforms
-        # train_transform_cfg = transforms.default_view_config()
-        # inference_transform_cfg = transforms.minimal_view_config()
-        # train_transform_cfg.output_size = resize_after_crop
-        # inference_transform_cfg.output_size = resize_after_crop
-
-        datamodule = webdatamodule.WebDataModule(
+        datamodule = WebDataModule(
             train_urls=train_urls,
             val_urls=val_urls,
             test_urls=test_urls,
+            predict_urls=test_urls,  # will make test predictions
             label_cols=schema.label_cols,
             # hardware
             batch_size=batch_size,
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
             cache_dir=cache_dir,
-            # augmentation args
-            greyscale=not color,
-            crop_scale_bounds=crop_scale_bounds,
-            crop_ratio_bounds=crop_ratio_bounds,
-            resize_after_crop=resize_after_crop,
-            # temporary: use SSL-like transform
-            # train_transform=transforms.GalaxyViewTransform(train_transform_cfg),
-            # inference_transform=transforms.GalaxyViewTransform(inference_transform_cfg),
+            train_transform=train_transform,
+            inference_transform=test_transform
         )
 
     # debug - check range of loaded images, should be 0-1
     datamodule.setup(stage='fit')
-    for (images, _) in datamodule.train_dataloader():
+    for batch in datamodule.train_dataloader():
+        images = batch['image']
         logging.info(f'Using batches of {images.shape[0]} images for training')
         logging.info('First batch image min/max: {}/{}'.format(images.min(), images.max()))
-        assert images.max() <= 1.0
-        assert images.min() >= 0.0
+        assert images.max() <= 1.0001
+        assert images.min() >= -0.0001
         break
-    # exit()
+
+    if train_transform_cfg.greyscale:
+        logging.info('Converting images to greyscale before training, setting channels=1')
+        channels = 1
+    else:
+        logging.warning('Training on color images, not converting to greyscale, setting channels=3')
+        channels = 3
 
     # these args are automatically logged
     lightning_model = define_model.ZoobotTree(
@@ -302,19 +315,19 @@ def train_default_zoobot_from_scratch(
     if sync_batchnorm:
         logging.info('Using sync batchnorm')
         lightning_model = TorchSyncBatchNorm().apply(lightning_model)
-    
-    
+
 
     # used later for checkpoint_callback.best_model_path
     checkpoint_callback, callbacks = get_default_callbacks(save_dir, patience, checkpoint_file_template, auto_insert_metric_name, save_top_k)
     if extra_callbacks:
         callbacks += extra_callbacks 
 
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         num_sanity_val_steps=0,
         log_every_n_steps=150,
         accelerator=accelerator,
         devices=devices,  # per node
+        accumulate_grad_batches=accumulate_gradients,
         num_nodes=nodes,
         strategy=strategy,
         precision=precision,
@@ -342,6 +355,38 @@ def train_default_zoobot_from_scratch(
             ckpt_path=checkpoint_callback.best_model_path  # can optionally point to a specific checkpoint here e.g. "/share/nas2/walml/repos/gz-decals-classifiers/results/early_stopping_1xgpu_greyscale/checkpoints/epoch=26-step=16847.ckpt"
         )
 
+        # TODO this will ONLY work with webdatasets
+        # if isinstance('datamodule', WebDataModule):
+        if webdatasets:
+            logging.info('Webdatamodule, running predictions')
+            predictions = trainer.predict(
+                model=lightning_model,
+                datamodule=datamodule,
+                ckpt_path=checkpoint_callback.best_model_path
+            )  # list of batches, each shaped like [batch_size, model_head]
+            logging.info('Preds before concat: {}'.format(len(predictions)))
+            predictions = torch.concatenate(predictions, dim=0).numpy()
+            logging.info('Preds after concat: {}'.format(predictions.shape))
+
+            datamodule.label_cols = ['id_str']  # triggers webdataset to return only id_str
+            datamodule.setup(stage='predict')
+            id_strs = [id_str for batch in datamodule.predict_dataloader() for id_str in batch[0]]  # [0] because each batch is a tuple
+
+            logging.info(f'id_str: {len(id_strs)}, preds: {len(predictions)})')
+            logging.info(predictions[0])
+            logging.info(id_strs[0])
+
+            try:
+                rank = torch.distributed.get_rank()
+            except RuntimeError:  # maybe not in distributed mode
+                rank = 0
+                logging.warning('No distributed rank found, using 0')
+
+            save_predictions.predictions_to_csv(predictions, id_strs, schema.label_cols, save_loc=save_dir + f'/test_predictions+_{rank}.csv')
+        else:
+            logging.info(f'Not a webdatamodule, skipping predictions, {datamodule.__class__}')
+        
+
     # explicitly update the model weights to the best checkpoint before returning
     # (assumes only one checkpoint callback, very likely in practice)
     # additional kwargs are passed to re-init the lighting_model automatically
@@ -364,7 +409,7 @@ def get_default_callbacks(save_dir, patience=8, checkpoint_file_template=None, a
             mode='min',
             # custom filename for checkpointing due to / in metric
             filename=checkpoint_file_template,
-            # https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html#pytorch_lightning.callbacks.ModelCheckpoint.params.auto_insert_metric_name
+            # https://pytorch-lightning.readthedocs.io/en/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html#lightning.pytorch.callbacks.ModelCheckpoint.params.auto_insert_metric_name
             # avoids extra folders from the checkpoint name
             auto_insert_metric_name=auto_insert_metric_name,
             save_top_k=save_top_k
@@ -396,7 +441,7 @@ def slurm_debugging_logs():
     logging.info(os.getenv("SLURM_JOB_ID", 'No SLURM_JOB_ID'))
     logging.info(os.getenv("SLURM_JOB_NAME", 'No SLURM_JOB_NAME'))
     logging.info(os.getenv("SLURM_NTASKS", 'No SLURM_NTASKS'))
-    # https://github.com/PyTorchLightning/pytorch-lightning/blob/d5fa02e7985c3920e72e268ece1366a1de96281b/pytorch_lightning/trainer/connectors/slurm_connector.py#L29
+    # https://github.com/PyTorchLightning/pytorch-lightning/blob/d5fa02e7985c3920e72e268ece1366a1de96281b/lightning/trainer/connectors/slurm_connector.py#L29
     # disable slurm detection by pl
     # this is not necessary for single machine, but might be for multi-node
     # may help stop tasks getting left on gpu after slurm exit?

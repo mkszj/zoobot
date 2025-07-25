@@ -36,16 +36,9 @@ Download the code using git:
 
     git clone git@github.com:mwalmsley/zoobot.git
 
-And then pick one of the three commands below to install Zoobot and PyTorch:
+And then install Zoobot (and PyTorch, if not already installed):
 
-    # Zoobot with PyTorch and a GPU. Requires CUDA 12.1 (or CUDA 11.8, if you use `_cu118` instead)
-    pip install -e "zoobot[pytorch-cu121]" --extra-index-url https://download.pytorch.org/whl/cu121
-
-    # OR Zoobot with PyTorch and no GPU
-    pip install -e "zoobot[pytorch-cpu]" --extra-index-url https://download.pytorch.org/whl/cpu
-
-    # OR Zoobot with PyTorch on Mac with M1 chip
-    pip install -e "zoobot[pytorch-m1]"
+    pip install -e "zoobot[pytorch]"
 
 This installs the downloaded Zoobot code using pip [editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs) so you can easily change the code locally. Zoobot is also available directly from pip (`pip install zoobot[option]`). Only use this if you are sure you won't be making changes to Zoobot itself. For Google Colab, use `pip install zoobot[pytorch_colab]`
 
@@ -62,16 +55,17 @@ Let's say you want to find ringed galaxies and you have a small labelled dataset
 
 ```python
 import pandas as pd
-from galaxy_datasets.pytorch.galaxy_datamodule import GalaxyDataModule
+from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 from zoobot.pytorch.training import finetune
 
 # csv with 'ring' column (0 or 1) and 'file_loc' column (path to image)
 labelled_df = pd.read_csv('/your/path/some_labelled_galaxies.csv')
 
-datamodule = GalaxyDataModule(
+datamodule = CatalogDataModule(
     label_cols=['ring'],
     catalog=labelled_df,
     batch_size=32
+    # will automatically apply default augmentations
 )
 
 # load trained Zoobot model
@@ -126,15 +120,16 @@ There is more explanation and an API reference on the [docs](https://zoobot.read
 
 <a name="install_cuda"></a>
 
-*If you're not using a GPU, skip this step. Use the pytorch-cpu option in the section below.*
+*If you're not using a GPU, skip this step*
 
-Install PyTorch 2.1.0 and compatible CUDA drivers. I highly recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) to do this. Conda will handle both creating a new virtual environment (`conda create`) and installing CUDA (`cudatoolkit`, `cudnn`)
+I highly recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) (or `mamba`, same thing but faster) to do this. Conda will handle both creating a new virtual environment (`conda create`) and installing CUDA (`cudatoolkit`, `cudnn`)
 
-CUDA 12.1 for PyTorch 2.1.0:
+CUDA 12.8 for PyTorch 2.7.0:
 
     conda create --name zoobot39_torch python==3.9
     conda activate zoobot39_torch
-    conda install -c conda-forge cudatoolkit=12.1
+    conda install nvidia/label/cuda-12.8.1::cuda
+    conda install nvidia/label/cuda-12.8.1::cuda-toolkit
 
 ### Recent release features (v2.0.0)
 

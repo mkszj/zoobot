@@ -4,14 +4,17 @@ from functools import partial
 from typing import Any, Optional, Union
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as L
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
+from lightning.pytorch.callbacks import LearningRateMonitor
+
 import timm
+from timm.optim import create_optimizer_v2
+from timm.scheduler import create_scheduler_v2
 import torch
 import torch.nn.functional as F
 import torchmetrics as tm
-from pytorch_lightning.callbacks import LearningRateMonitor
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from sklearn import linear_model
 from sklearn.metrics import accuracy_score
 
@@ -32,42 +35,38 @@ def freeze_batchnorm_layers(model):
             freeze_batchnorm_layers(child)  # recurse
 
 
-class FinetuneableZoobotAbstract(pl.LightningModule):
+class FinetuneableZoobotAbstract(L.LightningModule):
     """
     Parent class of :class:`FinetuneableZoobotClassifier`, :class:`FinetuneableZoobotRegressor`, :class:`FinetuneableZoobotTree`.
     You cannot use this class directly - you must use the child classes above instead.
 
     This class defines the shared finetuning args and methods used by those child classes.
     For example:
-    - When provided `name`, it will load the HuggingFace encoder with that name (see below for more).
-    - When provided `learning_rate` it will set the optimizer to use that learning rate.
+    * When provided ``name``, it will load the HuggingFace encoder with that name (see below for more).
+    * When provided ``learning_rate`` it will set the optimizer to use that learning rate.
 
     Any FinetuneableZoobot model can be loaded in one of three ways:
-        - HuggingFace name e.g. `FinetuneableZoobotX(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)`. Recommended.
-        - Any PyTorch model in memory e.g. `FinetuneableZoobotX(encoder=some_model, ...)`
-        - ZoobotTree checkpoint e.g. `FinetuneableZoobotX(zoobot_checkpoint_loc='path/to/zoobot_tree.ckpt', ...)`
+    * HuggingFace name e.g. ``FinetuneableZoobotX(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)``. Recommended.
+    * Any PyTorch model in memory e.g. ``FinetuneableZoobotX(encoder=some_model, ...)``
+    * ZoobotTree checkpoint e.g. ``FinetuneableZoobotX(zoobot_checkpoint_loc='path/to/zoobot_tree.ckpt', ...)``
 
     You could subclass this class to solve new finetuning tasks - see :ref:`advanced_finetuning`.
 
     Args:
-        name (str, optional): Name of a model on HuggingFace Hub e.g.'hf_hub:mwalmsley/zoobot-encoder-convnext_nano'. Defaults to None.
-        encoder (torch.nn.Module, optional): A PyTorch model already loaded in memory
-        zoobot_checkpoint_loc (str, optional): Path to ZoobotTree lightning checkpoint to load. Loads with Load with :func:`zoobot.pytorch.training.finetune.load_pretrained_zoobot`. Defaults to None.
-
-        n_blocks (int, optional):
-        lr_decay (float, optional): For each layer i below the head, reduce the learning rate by lr_decay ^ i. Defaults to 0.75.
-        weight_decay (float, optional): AdamW weight decay arg (i.e. L2 penalty). Defaults to 0.05.
-        learning_rate (float, optional): AdamW learning rate arg. Defaults to 1e-4.
-        dropout_prob (float, optional): P of dropout before final output layer. Defaults to 0.5.
-        always_train_batchnorm (bool, optional): Temporarily deprecated. Previously, if True, do not update batchnorm stats during finetuning. Defaults to True.
-        cosine_schedule (bool, optional): Reduce the learning rate each epoch according to a cosine schedule, after warmup_epochs. Defaults to False.
-        warmup_epochs (int, optional): Linearly increase the learning rate from 0 to ``learning_rate`` over the first ``warmup_epochs`` epochs, before applying cosine schedule. No effect if cosine_schedule=False.
-        max_cosine_epochs (int, optional): Epochs for the scheduled learning rate to decay to final learning rate (below). Warmup epochs don't count. No effect if ``cosine_schedule=False``.
-        max_learning_rate_reduction_factor (float, optional): Set final learning rate as ``learning_rate`` * ``max_learning_rate_reduction_factor``. No effect if ``cosine_schedule=False``.
-        from_scratch (bool, optional): Ignore all settings above and train from scratch at ``learning_rate`` for all layers. Useful for a quick baseline. Defaults to False.
-        prog_bar (bool, optional): Print progress bar during finetuning. Defaults to True.
-        visualize_images (bool, optional): Upload example images to WandB. Good for debugging but slow. Defaults to False.
-        seed (int, optional): random seed to use. Defaults to 42.
+        name (str, optional): Name of a model on HuggingFace Hub e.g. ``hf_hub:mwalmsley/zoobot-encoder-convnext_nano``. Defaults to ``None``.
+        encoder (torch.nn.Module, optional): Instead of ``name``, use a PyTorch model already loaded in memory. Defaults to ``None``.
+        zoobot_checkpoint_loc (str, optional): Instead of ``name``, use a path to ZoobotTree lightning checkpoint to load. Loads with :func:`zoobot.pytorch.training.finetune.load_pretrained_zoobot`. Defaults to ``None``.
+        training_mode (str, optional): ``'full'`` to train all parameters, ``'head_only'`` to freeze encoder and only train head. Defaults to ``'full'``.
+        layer_decay (float, optional): For each layer below the head, reduce the learning rate by ``layer_decay ** i``. Defaults to ``0.75``.
+        weight_decay (float, optional): AdamW weight decay arg (i.e. L2 penalty). Defaults to ``0.05``.
+        learning_rate (float, optional): AdamW learning rate arg. Defaults to ``1e-4``.
+        head_dropout_prob (float, optional): Probability of dropout before final output layer. Defaults to ``0.5``.
+        scheduler_kwargs (dict, optional): Arguments for the optional learning rate scheduler. Defaults to ``None`` (no scheduler).
+        timm_kwargs (dict, optional): Additional arguments for ``timm.create_model``.
+        greyscale (bool, optional): If ``True``, convert model to single channel version (adds ``{'in_chans': 1}`` to timm kwargs). Defaults to ``False``.
+        prog_bar (bool, optional): Print progress bar during finetuning. Defaults to ``True``.
+        visualize_images (bool, optional): Upload example images to WandB. Good for debugging but potentially slow. Defaults to ``False``.
+        seed (int, optional): Random seed to use. Defaults to ``42``.
     """
 
     def __init__(
@@ -83,23 +82,18 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         # (aimed at supervised experiments)
         zoobot_checkpoint_loc=None,
         # finetuning settings
-        n_blocks=0,  # how many layers deep to FT
-        lr_decay=0.75,
+        training_mode='full',  # 'full' to train all params, 'head_only' to freeze encoder and only train head
+        layer_decay=0.75,
         weight_decay=0.05,
         learning_rate=1e-4,  # 10x lower than typical, you may like to experiment
-        dropout_prob=0.5,
-        always_train_batchnorm=False,  # temporarily deprecated
+        head_dropout_prob=0.5,
         # these args are for the optional learning rate scheduler, best not to use unless you've tuned everything else already
-        cosine_schedule=False,
-        warmup_epochs=0,
-        max_cosine_epochs=100,
-        max_learning_rate_reduction_factor=0.01,
-        # escape hatch for 'from scratch' baselines
-        from_scratch=False,
+        scheduler_kwargs=None,  # e.g. {'name': 'cosine', 'warmup_epochs': 5, 'max_epochs': 100}
         # debugging utils
+        timm_kwargs={},  
+        greyscale=False,  # sets {'in_chans': 1} for greyscale models
         prog_bar=True,
         visualize_images=False,  # upload examples to wandb, good for debugging
-        n_layers=0, # deprecated (no effect) but can't remove yet as is an arg in some saved checkpoints
         seed=42,
     ):
         super().__init__()
@@ -116,24 +110,21 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         # if you need the encoder to recreate, pass when loading checkpoint e.g.
         # FinetuneableZoobotTree.load_from_checkpoint(loc, encoder=encoder)
 
+        if greyscale:
+            logging.warning('Converting encoder to single channel version')
+            timm_kwargs['in_chans'] = 1  # convert model to single channel version
+
         if name is not None:  # will load from Hub
             assert encoder is None, 'Cannot pass both name and encoder to use'
-            if 'greyscale' in name:
-                # I'm not sure why timm is happy to convert color model stem to greyscale 
-                # but doesn't correctly load greyscale model without this hack
-                logging.info('Loading greyscale model (auto-detected from name)')
-                timm_kwargs = {'in_chans': 1}
-            else:
-                timm_kwargs = {}
             self.encoder = timm.create_model(name, num_classes=0, pretrained=True, **timm_kwargs)
-            self.encoder_dim = self.encoder.num_features
+            self.encoder_dim: int = self.encoder.num_features
 
         elif zoobot_checkpoint_loc is not None:  # will load from local checkpoint
             assert encoder is None, "Cannot pass both checkpoint to load and encoder to use"
             self.encoder = load_pretrained_zoobot(
                 zoobot_checkpoint_loc
             )  # extracts the timm encoder
-            self.encoder_dim = self.encoder.num_features
+            self.encoder_dim: int = self.encoder.num_features  # type: ignore
 
         else:  # passed encoder in-memory directly
             assert (
@@ -149,26 +140,14 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
             else:  # resort to manual estimate
                 self.encoder_dim = define_model.get_encoder_dim(self.encoder)
 
-        self.n_blocks = n_blocks
+        self.training_mode = training_mode
 
         self.learning_rate = learning_rate
-        self.lr_decay = lr_decay
+        self.layer_decay = layer_decay
         self.weight_decay = weight_decay
-        self.dropout_prob = dropout_prob
+        self.head_dropout_prob = head_dropout_prob
 
-        self.cosine_schedule = cosine_schedule
-        self.warmup_epochs = warmup_epochs
-        self.max_cosine_epochs = max_cosine_epochs
-        self.max_learning_rate_reduction_factor = max_learning_rate_reduction_factor
-
-        self.from_scratch = from_scratch
-
-        self.always_train_batchnorm = always_train_batchnorm
-        if self.always_train_batchnorm:
-            raise NotImplementedError(
-                "Temporarily deprecated, always_train_batchnorm=True not supported"
-            )
-            # logging.info('always_train_batchnorm=True, so all batch norm layers will be finetuned')
+        self.scheduler_kwargs = scheduler_kwargs
 
         self.train_loss_metric = tm.MeanMetric()
         self.val_loss_metric = tm.MeanMetric()
@@ -188,153 +167,85 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
 
     def configure_optimizers(self):
         """
-        This controls which parameters get optimized
+        Sets up the optimizer and, optionally, a learning rate scheduler.
 
-        self.head is always optimized, with no learning rate decay
-        when self.n_blocks == 0, only self.head is optimized (i.e. frozen* encoder)
+        When ``self.training_mode == 'head_only'``, only ``self.head`` is optimized (i.e. frozen encoder, linear finetuning).
+        When ``self.training_mode == 'full'``, all parameters are optimized.
 
-        for self.encoder, we enumerate the blocks (groups of layers) to potentially finetune
-        and then pick the top self.n_blocks to finetune
+        Learning rate decay is applied to the encoder only.
+        Counterintuitively, a higher learning rate decay value (e.g. ``0.9``) causes less reduction in the learning rate: the learning rate is (from the top encoder layer down) ``lr``, ``lr * layer_decay``, ``lr * layer_decay**2``, ...
+        I use timm's definition of layers, which groups some torch layers together.
 
-        weight_decay is applied to both the head and (if relevant) the encoder
-        learning rate decay is applied to the encoder only: lr x (lr_decay^block_n), ignoring the head (block 0)
+        Weight decay (aka L2 regularization, penalizing large weights) is applied to both the head and (if relevant) the encoder.
 
-        What counts as a "block" is a bit fuzzy, but I generally use the self.encoder.stages from timm. I also count the stem as a block.
-
-        batch norm layers may optionally still have updated statistics using always_train_batchnorm
+        For schedulers, I use the timm scheduler factory. See https://github.com/rwightman/timm/blob/main/timm/scheduler/scheduler_factory.py#L63.
+        self.scheduler_kwargs (passed to the factory) should be a dict with the scheduler name and any additional args, e.g. ``{'name': 'cosine', 'warmup_epochs': 5, 'max_epochs': 100}``.
         """
-
-        lr = self.learning_rate
-        params = [{"params": self.head.parameters(), "lr": lr}]
 
         logging.info(f"Encoder architecture to finetune: {type(self.encoder)}")
 
-        if self.from_scratch:
-            logging.warning(
-                "self.from_scratch is True, training everything and ignoring all settings"
-            )
-            params += [{"params": self.encoder.parameters(), "lr": lr}]
-            return torch.optim.AdamW(params, weight_decay=self.weight_decay)
 
-        if isinstance(self.encoder, timm.models.EfficientNet):  # includes v2
-            # TODO for now, these count as separate layers, not ideal
-            early_tuneable_layers = [self.encoder.conv_stem, self.encoder.bn1]
-            encoder_blocks = list(self.encoder.blocks)
-            tuneable_blocks = early_tuneable_layers + encoder_blocks
-        elif isinstance(self.encoder, timm.models.ResNet):
-            # all timm resnets seem to have this structure
-            tuneable_blocks = [
-                # similarly
-                self.encoder.conv1,
-                self.encoder.bn1,
-                self.encoder.layer1,
-                self.encoder.layer2,
-                self.encoder.layer3,
-                self.encoder.layer4,
-            ]
-        elif isinstance(self.encoder, timm.models.MaxxVit):
-            tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
-        elif isinstance(self.encoder, timm.models.ConvNeXt):  # stem + 4 blocks, for all sizes
-            # https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/convnext.py#L264
-            tuneable_blocks = [self.encoder.stem] + [stage for stage in self.encoder.stages]
-        elif isinstance(self.encoder, timm.models.VisionTransformer):
-            tuneable_blocks = [self.encoder.patch_embed] + [block for block in self.encoder.blocks]
+        if hasattr(self.encoder, 'vit'):  # e.g. mae
+            logging.info('Encoder has vit attribute, assuming this is timm VisionTransformer')
+            model_to_optimize: torch.nn.Module = self.encoder.vit  # type: ignore
         else:
-            raise ValueError(
-                f"Encoder architecture not automatically recognised: {type(self.encoder)}"
+            model_to_optimize: torch.nn.Module = self.encoder
+
+        if hasattr(model_to_optimize, 'pos_embed'):
+            logging.info("Encoder has pos_embed, will not train it")
+            model_to_optimize.pos_embed.requires_grad_(False)  # don't train pos_embed - typically, not a learnable parameter, despite timm defaults?
+
+        if self.training_mode == 'full':
+            logging.info("Training all parameters, not just the head")
+            optimizer = create_optimizer_v2(
+                model_to_optimize,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay= self.layer_decay
+            )
+            # add head parameters to optimizer
+            optimizer.add_param_group({'params': self.head.parameters(), 'lr': self.learning_rate})  # type: ignore
+        elif self.training_mode == 'head_only':
+            logging.info("Training only the head, encoder frozen")
+            # freeze encoder
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            # freeze_batchnorm_layers(self.encoder)
+            optimizer = create_optimizer_v2(
+                self.head,
+                opt='adamw',
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+                layer_decay=None
             )
 
-        assert self.n_blocks <= len(
-            tuneable_blocks
-        ), f"Network only has {len(tuneable_blocks)} tuneable blocks, {self.n_blocks} specified for finetuning"
+        logging.info("Optimizer ready")
 
-        # take n blocks, ordered highest layer to lowest layer
-        tuneable_blocks.reverse()
-        logging.info(f"possible blocks to tune: {len(tuneable_blocks)}")
-
-        # will finetune all params in first N
-        logging.info(f"blocks that will be tuned: {self.n_blocks}")
-        blocks_to_tune = tuneable_blocks[: self.n_blocks]
-
-        # optionally, can finetune batchnorm params in remaining layers
-        remaining_blocks = tuneable_blocks[self.n_blocks :]
-        logging.info(f"Remaining blocks: {len(remaining_blocks)}")
-
-        assert not any(
-            [block in remaining_blocks for block in blocks_to_tune]
-        ), "Some blocks are in both tuneable and remaining"
-
-        # Append parameters of layers for finetuning along with decayed learning rate
-        for i, block in enumerate(blocks_to_tune):  # _ is the block name e.g. '3'
-            logging.info(f"Adding block {block} with lr {lr * (self.lr_decay**i)}")
-            params.append({"params": block.parameters(), "lr": lr * (self.lr_decay**i)})
-
-        # optionally, for the remaining layers (not otherwise finetuned) you can choose to still FT the batchnorm layers
-        for i, block in enumerate(remaining_blocks):
-            if self.always_train_batchnorm:
-                raise NotImplementedError
-                # _, block_batch_norm_params = get_batch_norm_params_lighting(block)
-                # params.append({
-                #     "params": block_batch_norm_params,
-                #     "lr": lr * (self.lr_decay**i)
-                # })
-
-        logging.info(f"param groups: {len(params)}")
-
-        # because it iterates through the generators, THIS BREAKS TRAINING so only uncomment to debug params
-        # for param_group_n, param_group in enumerate(params):
-        #     shapes_within_param_group = [p.shape for p in list(param_group['params'])]
-        #     logging.debug('param group {}: {}'.format(param_group_n, shapes_within_param_group))
-        # print('head params to optimize', [p.shape for p in params[0]['params']])  # head only
-        # print(list(param_group['params']) for param_group in params)
-        # exit()
-        # Initialize AdamW optimizer
-
-        opt = torch.optim.AdamW(
-            params, weight_decay=self.weight_decay
-        )  # lr included in params dict
-        logging.info("Optimizer ready, configuring scheduler")
-
-        if self.cosine_schedule:
-            logging.info(
-                "Using lightly cosine schedule, warmup for {} epochs, max for {} epochs".format(
-                    self.warmup_epochs, self.max_cosine_epochs
-                )
-            )
-            # from lightly.utils.scheduler import CosineWarmupScheduler  #copied from here to avoid dependency
-            # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
-            # Dictionary, with an "optimizer" key, and (optionally) a "lr_scheduler" key whose value is a single LR scheduler or lr_scheduler_config.
-            lr_scheduler = schedulers.CosineWarmupScheduler(
-                optimizer=opt,
-                warmup_epochs=self.warmup_epochs,
-                max_epochs=self.max_cosine_epochs,
-                start_value=self.learning_rate,
-                end_value=self.learning_rate * self.max_learning_rate_reduction_factor,
-            )
-
-            # logging.info('Using CosineAnnealingLR schedule, warmup not supported, max for {} epochs'.format(self.max_cosine_epochs))
-            # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            #     optimizer=opt,
-            #     T_max=self.max_cosine_epochs,
-            #     eta_min=self.learning_rate * self.max_learning_rate_reduction_factor
-            # )
-
+        if self.scheduler_kwargs is not None:
+            logging.info(f"Using scheduler with kwargs: {self.scheduler_kwargs}")
+            # https://github.com/rwightman/timm/blob/main/timm/scheduler/scheduler_factory.py#L63
+            scheduler, _ = create_scheduler_v2(optimizer, **self.scheduler_kwargs) # e.g. 'cosine', warmup_epochs=5)
             return {
-                "optimizer": opt,
+                "optimizer": optimizer,
                 "lr_scheduler": {
-                    "scheduler": lr_scheduler,
+                    "scheduler": scheduler,
                     "interval": "epoch",
                     "frequency": 1,
                 },
             }
         else:
             logging.info("Learning rate scheduler not used")
-        return opt
+            logging.info("Manually applying lr_scale to optimizer param groups (because timm scheduler normally does this, but there is no scheduler)")
+            for group in optimizer.param_groups:
+                group['lr_scale'] = group.get('lr_scale', 1.0)
+                group['lr'] *= group['lr_scale']
+            return optimizer
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
-        x = self.head(x)
-        # TODO encoder output shape changes with input shape (of course) so need to specify explicitly or skip
+        x = self.head(x)  # type:ignore
         return x
 
     def make_step(self, batch):
@@ -342,12 +253,16 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
         return self.step_to_dict(y, y_pred, loss)
 
     def run_step_through_model(self, batch):
-        # part of training/val/test for all subclasses
-        x, y = batch
+      # part of training/val/test for all subclasses
+        x, y = self.batch_to_supervised_tuple(batch)
         y_pred = self.forward(x)
-        loss = self.loss(y_pred, y)  # must be subclasses and specified
+        # must be subclasses and specified
+        loss = self.loss(y_pred, y)  # type:ignore
         loss.float()
         return y, y_pred, loss
+    
+    def batch_to_supervised_tuple(self, batch):
+        raise NotImplementedError('Must be subclassed to convert batch to supervised tuple (x, y)')
 
     def step_to_dict(self, y, y_pred, loss):
         return {"loss": loss.mean(), "predictions": y_pred, "labels": y}
@@ -361,13 +276,10 @@ class FinetuneableZoobotAbstract(pl.LightningModule):
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         return self.make_step(batch)
 
-    def predict_step(self, batch, batch_idx) -> Any:
-        # I can't work out how to get webdataset to return a single item im, not a tuple (im,).
-        # this is fine for training but annoying for predict
-        # help welcome. meanwhile, this works around it
-        if isinstance(batch, list) and len(batch) == 1:
-            return self(batch[0])
-        return self(batch)
+    def predict_step(self, x: torch.Tensor, batch_idx):
+        return self.forward(x['image'])  # type: ignore
+        # forward = self(batch)
+        # and convert to nice pandas dataframe using self.label_col, self.schema, etc
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int, dataloader_idx=0):
         # v2 docs currently do not show dataloader_idx as train argument so unclear if this will value be updated properly
@@ -427,40 +339,59 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
     """
     Pretrained Zoobot model intended for finetuning on a classification problem.
 
-    Any args not listed below are passed to :class:``FinetuneableZoobotAbstract`` (for example, `learning_rate`).
+    Any args not listed below are passed to :class:`FinetuneableZoobotAbstract` (for example, ``learning_rate``).
     These are shared between classifier, regressor, and tree models.
-    See the docstring of :class:``FinetuneableZoobotAbstract`` for more.
+    See the docstring of :class:`FinetuneableZoobotAbstract` for more.
 
-    Models can be loaded with `FinetuneableZoobotClassifier(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)`.
-    See :class:``FinetuneableZoobotAbstract`` for other loading options (e.g. in-memory models or local checkpoints).
+    Models can be loaded with ``FinetuneableZoobotClassifier(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)``.
+    See :class:`FinetuneableZoobotAbstract` for other loading options (e.g. in-memory models or local checkpoints).
 
     Args:
-        num_classes (int): num. of target classes (e.g. 2 for binary classification).
-        label_smoothing (float, optional): See torch cross_entropy_loss docs. Defaults to 0.
-        class_weights (arraylike, optional): See torch cross_entropy_loss docs. Defaults to None.
-        run_linear_sanity_check (bool, optional): Before fitting, use sklearn to fit a linear model. Defaults to False.
-
+        label_col (str, optional): Name of the column in the batch dict (e.g. a column in your dataframe) containing the labels. Defaults to ``'label'``.
+        num_classes (int): Number of target classes (e.g. ``2`` for binary classification).
+        label_smoothing (float, optional): See torch ``cross_entropy_loss`` docs. Defaults to ``0``.
+        class_weights (arraylike, optional): See torch ``cross_entropy_loss`` docs. Defaults to ``None``.
+        run_linear_sanity_check (bool, optional): Before fitting, use sklearn to fit a linear model. Defaults to ``False``.
     """
 
     def __init__(
-        self, num_classes: int, label_smoothing=0.0, class_weights=None, run_linear_sanity_check=False, **super_kwargs
-    ) -> None:
+            self,
+            num_classes: int,
+            label_col: str = 'label',
+            label_smoothing=0.,
+            class_weights=None,
+
+            run_linear_sanity_check: bool = False,
+            **super_kwargs) -> None:
 
         super().__init__(**super_kwargs)
 
+        self.label_col = label_col
+
+        self.label_col = label_col
+
         logging.info("Using classification head and cross-entropy loss")
         self.head = LinearHead(
-            input_dim=self.encoder_dim,
+            input_dim=self.encoder_dim,  # type: ignore
             output_dim=num_classes,
-            dropout_prob=self.dropout_prob,
+            head_dropout_prob=self.head_dropout_prob,
         )
         self.label_smoothing = label_smoothing
-        self.loss = partial(
-            cross_entropy_loss,
-            weight=class_weights,
-            label_smoothing=self.label_smoothing,
-        )
-        logging.info(f"num_classes: {num_classes}")
+
+        # if isinstance(class_weights, list) or isinstance(class_weights, np.ndarray):
+        if class_weights is not None:
+            # https://lightning.ai/docs/pytorch/stable/accelerators/accelerator_prepare.html#init-tensors-using-tensor-to-and-register-buffer
+            self.register_buffer("class_weights", torch.Tensor(class_weights))
+            print(self.class_weights, self.class_weights.device)  # type: ignore
+            # can now use self.class_weights in forward pass and will be on correct device (because treated as model parameters)
+        else:
+            self.class_weights = None
+
+        self.loss = partial(cross_entropy_loss,
+                            weight=self.class_weights,
+                            label_smoothing=self.label_smoothing)
+        logging.info(f'num_classes: {num_classes}')
+
         if num_classes == 2:
             logging.info("Using binary classification")
             task = "binary"
@@ -482,6 +413,8 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             "class_predictions": y_class_preds,
         }
 
+    def batch_to_supervised_tuple(self, batch):
+        return batch['image'], batch[self.label_col]
 
     def on_train_batch_end(self, step_output, *args):
         super().on_train_batch_end(step_output, *args)
@@ -520,15 +453,13 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
         )
 
     def predict_step(self, x: Union[list[torch.Tensor], torch.Tensor], batch_idx):
-        # see Abstract version
-        if isinstance(x, list) and len(x) == 1:
-            return self(x[0])
-        x = self.forward(x)  # type: ignore # logits from LinearHead
-        # then applies softmax
+        # overrides abstract version
+        x = self.forward(x['image'])  # type: ignore # logits from LinearHead
+        # then applies softmax. Only in predict step because we prefer logits for gradient stability during training
         return F.softmax(x, dim=1)
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):
-        # self.logger is set by pl.Trainer(logger=) argument
+      # self.logger is set by L.Trainer(logger=) argument
         if (self.logger is not None) and (batch_idx == 0):
             x, y = batch
             y_pred_softmax = F.softmax(outputs["predictions"], dim=1)
@@ -551,12 +482,12 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
             embeddings, labels = {"train": [], "val": []}, {"train": [], "val": []}
 
             # Get validation set embeddings
-            for x, y in self.trainer.datamodule.val_dataloader():
+            for x, y in self.trainer.datamodule.val_dataloader():  # type: ignore
                 embeddings["val"] += self.encoder(x.to(self.device)).cpu()
                 labels["val"] += y
 
             # Get train set embeddings
-            for x, y in self.trainer.datamodule.train_dataloader():
+            for x, y in self.trainer.datamodule.train_dataloader():  # type: ignore
                 embeddings["train"] += self.encoder(x.to(self.device)).cpu()
                 labels["train"] += y
 
@@ -566,11 +497,11 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
 
             self.log(
                 "finetuning/linear_eval/val",
-                accuracy_score(labels["val"], model.predict(embeddings["val"])),
+                accuracy_score(labels["val"], model.predict(embeddings["val"])),  # type: ignore
             )
             self.log(
                 "finetuning/linear_eval/train",
-                accuracy_score(labels["train"], model.predict(embeddings["train"])),
+                accuracy_score(labels["train"], model.predict(embeddings["train"])),  # type: ignore
             )
             # doesn't need to be torchmetric, only happens in one go? but distributed
 
@@ -578,23 +509,30 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
     """
     Pretrained Zoobot model intended for finetuning on a regression problem.
 
-    Any args not listed below are passed to :class:``FinetuneableZoobotAbstract`` (for example, `learning_rate`).
+    Any args not listed below are passed to :class:`FinetuneableZoobotAbstract` (for example, ``learning_rate``).
     These are shared between classifier, regressor, and tree models.
-    See the docstring of :class:``FinetuneableZoobotAbstract`` for more.
+    See the docstring of :class:`FinetuneableZoobotAbstract` for more.
 
-    Models can be loaded with `FinetuneableZoobotRegressor(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)`.
-    See :class:``FinetuneableZoobotAbstract`` for other loading options (e.g. in-memory models or local checkpoints).
+    Models can be loaded with ``FinetuneableZoobotRegressor(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)``.
+    See :class:`FinetuneableZoobotAbstract` for other loading options (e.g. in-memory models or local checkpoints).
 
 
     Args:
-        loss (str, optional): Loss function to use. Must be one of 'mse', 'mae'. Defaults to 'mse'.
-        unit_interval (bool, optional): If True, use sigmoid activation for the final layer, ensuring predictions between 0 and 1. Defaults to False.
-
+        label_col (str, optional): Name of the column in the batch dict (e.g. a column in your dataframe) containing the labels. Defaults to ``'label'``.
+        loss (str, optional): Loss function to use. Must be one of ``'mse'``, ``'mae'``. Defaults to ``'mse'``.
+        unit_interval (bool, optional): If ``True``, use sigmoid activation for the final layer, ensuring predictions between 0 and 1. Defaults to ``False``.
     """
 
-    def __init__(self, loss: str = "mse", unit_interval: bool = False, **super_kwargs) -> None:
+    def __init__(
+            self,
+            label_col: str = 'label',
+            loss: str = 'mse',
+            unit_interval: bool = False,
+            **super_kwargs) -> None:
 
         super().__init__(**super_kwargs)
+
+        self.label_col = label_col  # TODO could add MultipleLabelRegressor, Nasser working on this
 
         self.unit_interval = unit_interval
         if self.unit_interval:
@@ -607,7 +545,7 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
         self.head = LinearHead(
             input_dim=self.encoder_dim,
             output_dim=1,
-            dropout_prob=self.dropout_prob,
+            head_dropout_prob=self.head_dropout_prob,
             activation=head_activation,
         )
         if loss in ["mse", "mean_squared_error"]:
@@ -622,8 +560,12 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
         self.val_rmse = tm.MeanSquaredError(squared=False)
         self.test_rmse = tm.MeanSquaredError(squared=False)
 
+
     def step_to_dict(self, y, y_pred, loss):
-        return {"loss": loss.mean(), "predictions": y_pred, "labels": y}
+        return {'loss': loss.mean(), 'predictions': y_pred, 'labels': y}
+    
+    def batch_to_supervised_tuple(self, batch):
+        return batch['image'], batch[self.label_col]
 
     def on_train_batch_end(self, step_output, *args):
         super().on_train_batch_end(step_output, *args)
@@ -661,11 +603,8 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
             prog_bar=self.prog_bar,
         )
 
-    def predict_step(self, x: Union[list[torch.Tensor], torch.Tensor], batch_idx):
-        # see Abstract version
-        if isinstance(x, list) and len(x) == 1:
-            return self(x[0])
-        return self.forward(x)
+    def predict_step(self, x: torch.Tensor, batch_idx):
+        return self.forward(x['image'])  # type: ignore
 
 
 class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
@@ -679,18 +618,23 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
 
     If you're using this, you're probably working on a Galaxy Zoo catalog, and you should Slack Mike!
 
-    Any args not listed below are passed to :class:``FinetuneableZoobotAbstract`` (for example, `learning_rate`).
+    Any args not listed below are passed to :class:`FinetuneableZoobotAbstract` (for example, ``learning_rate``).
     These are shared between classifier, regressor, and tree models.
-    See the docstring of :class:``FinetuneableZoobotAbstract`` for more.
+    See the docstring of :class:`FinetuneableZoobotAbstract` for more.
 
-    Models can be loaded with `FinetuneableZoobotTree(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)`.
-    See :class:``FinetuneableZoobotAbstract`` for other loading options (e.g. in-memory models or local checkpoints).
+    Models can be loaded with ``FinetuneableZoobotTree(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)``.
+    See :class:`FinetuneableZoobotAbstract` for other loading options (e.g. in-memory models or local checkpoints).
 
     Args:
-        schema (schemas.Schema): description of the layout of the decision tree. See :class:`zoobot.shared.schemas.Schema`.
+        schema (schemas.Schema): Description of the layout of the decision tree. See :class:`zoobot.shared.schemas.Schema`.
     """
 
     def __init__(self, schema: schemas.Schema, **super_kwargs):
+        """Initialize the finetuneable Zoobot tree model.
+
+        Args:
+            schema (schemas.Schema): Description of the layout of the decision tree. See :class:`zoobot.shared.schemas.Schema` for examples.
+        """
 
         super().__init__(**super_kwargs)
 
@@ -703,10 +647,23 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
             encoder_dim=self.encoder_dim,
             output_dim=self.output_dim,
             test_time_dropout=False,
-            dropout_rate=self.dropout_prob,
+            dropout_rate=self.head_dropout_prob,
         )
 
-        self.loss = define_model.get_dirichlet_loss_func(self.schema.question_index_groups)
+        self.loss = define_model.get_dirichlet_loss_func(self.schema.question_answer_pairs)
+
+    def batch_to_supervised_tuple(self, batch):
+        """
+        Converts a batch to a supervised tuple (x, y) for training.
+        x is the image, y is the counts of votes for each answer in the schema.
+        """
+        x = batch['image']
+        # y is a dict with keys as label_cols and values as counts
+        y = dict([(label_col, batch[label_col]) for label_col in self.schema.label_cols])
+
+        # old version, tensor of shape (batch, answers)
+        # y = torch.stack([batch[label_col] for label_col in self.schema.label_cols], dim=1)
+        return x, y
 
     def upload_images_to_wandb(self, outputs, batch, batch_idx):
         raise NotImplementedError
@@ -715,37 +672,38 @@ class FinetuneableZoobotTree(FinetuneableZoobotAbstract):
 
 
 class LinearHead(torch.nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, dropout_prob=0.5, activation=None):
+    def __init__(self, input_dim: int, output_dim: int, head_dropout_prob=0.5, activation=None):
         """
         Small utility class for a linear head with dropout and optional choice of activation.
 
         - Apply dropout to features before the final linear layer.
-        - Apply a final linear layer
-        - Optionally, apply `activation` callable
+        - Apply a final linear layer.
+        - Optionally, apply ``activation`` callable.
 
         Args:
-            input_dim (int): input dim of the linear layer (i.e. the encoder output dimension)
-            output_dim (int): output dim of the linear layer (often e.g. N for N classes, or 1 for regression)
-            dropout_prob (float, optional): Dropout probability. Defaults to 0.5.
-            activation (callable, optional): callable expecting tensor e.g. torch softmax. Defaults to None.
+            input_dim (int): Input dimension of the linear layer (i.e. the encoder output dimension).
+            output_dim (int): Output dimension of the linear layer (often e.g. N for N classes, or 1 for regression).
+            head_dropout_prob (float, optional): Dropout probability. Defaults to ``0.5``.
+            activation (callable, optional): Callable expecting tensor e.g. torch softmax. Defaults to ``None``.
         """
         # input dim is representation dim, output_dim is num classes
         super(LinearHead, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
 
-        self.dropout = torch.nn.Dropout(p=dropout_prob)
+        self.dropout = torch.nn.Dropout(p=head_dropout_prob)
         self.linear = torch.nn.Linear(input_dim, output_dim)
         self.activation = activation
 
     def forward(self, x):
-        """returns logits, as recommended for CrossEntropy loss
+        """
+        Returns logits, as recommended for CrossEntropy loss.
 
         Args:
-            x (torch.Tensor): encoded representation
+            x (torch.Tensor): Encoded representation.
 
         Returns:
-            torch.Tensor: result (see docstring of LinearHead)
+            torch.Tensor: Result (see docstring of LinearHead).
         """
         #
         x = self.dropout(x)
@@ -763,88 +721,74 @@ def cross_entropy_loss(
 ):
     """
     Calculate cross-entropy loss with optional label smoothing and class weights. No aggregation applied.
-    Trivial wrapper of torch.nn.functional.cross_entropy with reduction='none'.
+    Trivial wrapper of ``torch.nn.functional.cross_entropy`` with ``reduction='none'``.
 
     Args:
-        y_pred (torch.Tensor): ints of shape (batch)
-        y (torch.Tensor): predictions of shape (batch, classes)
-        label_smoothing (float, optional): See docstring of torch.nn.functional.cross_entropy. Defaults to 0..
-        weight (arraylike, optional): See docstring of torch.nn.functional.cross_entropy. Defaults to None.
+        y_pred (torch.Tensor): Predictions of shape ``(batch, classes)``.
+        y (torch.Tensor): Targets of shape ``(batch)``.
+        label_smoothing (float, optional): See docstring of ``torch.nn.functional.cross_entropy``. Defaults to ``0.0``.
+        weight (arraylike, optional): See docstring of ``torch.nn.functional.cross_entropy``. Defaults to ``None``.
 
     Returns:
-        torch.Tensor: unreduced cross-entropy loss
+        torch.Tensor: Unreduced cross-entropy loss.
     """
-    return F.cross_entropy(
-        y_pred,
-        y.long(),
-        label_smoothing=label_smoothing,
-        weight=weight,
-        reduction="none",
-    )
+
+    # added .to(y) to ensure weights are on same device, bit of a hack but self.register_buffer() doesn't work as I expected
+    # should be true automatically anyway if passing in self.weights above
+    return F.cross_entropy(y_pred, y.long(), label_smoothing=label_smoothing, weight=weight.to(y) if weight is not None else None, reduction='none')  
 
 
 def mse_loss(y_pred, y):
     """
-    Trivial wrapper of torch.nn.functional.mse_loss with reduction='none'.
+    Trivial wrapper of ``torch.nn.functional.mse_loss`` with ``reduction='none'``.
 
     Args:
-        y_pred (torch.Tensor): See docstring of torch.nn.functional.mse_loss.
-        y (torch.Tensor): See docstring of torch.nn.functional.mse_loss.
+        y_pred (torch.Tensor): See docstring of ``torch.nn.functional.mse_loss``.
+        y (torch.Tensor): See docstring of ``torch.nn.functional.mse_loss``.
 
     Returns:
-        torch.Tensor: See docstring of torch.nn.functional.mse_loss.
+        torch.Tensor: See docstring of ``torch.nn.functional.mse_loss``.
     """
     return F.mse_loss(y_pred, y, reduction="none")
 
 
 def l1_loss(y_pred, y):
     """
-    Trivial wrapper of torch.nn.functional.l1_loss with reduction='none'.
+    Trivial wrapper of ``torch.nn.functional.l1_loss`` with ``reduction='none'``.
 
     Args:
-        y_pred (torch.Tensor): See docstring of torch.nn.functional.l1_loss.
-        y (torch.Tensor): See docstring of torch.nn.functional.l1_loss.
+        y_pred (torch.Tensor): See docstring of ``torch.nn.functional.l1_loss``.
+        y (torch.Tensor): See docstring of ``torch.nn.functional.l1_loss``.
 
     Returns:
-        torch.Tensor: See docstring of torch.nn.functional.l1_loss.
+        torch.Tensor: See docstring of ``torch.nn.functional.l1_loss``.
     """
     return F.l1_loss(y_pred, y, reduction="none")
 
 
-def dirichlet_loss(y_pred: torch.Tensor, y: torch.Tensor, question_index_groups):
-    """
-    Calculate Dirichlet-Multinomial loss for a batch of predictions and labels.
-    Returns a scalar loss (ready for gradient descent) by summing across answers and taking a mean across the batch.
-    Reduction equivalent to sum(axis=1).mean(), but with fewer operations.
-
-    Args:
-        y_pred (torch.Tensor): Predicted dirichlet distribution, of shape (batch, answers)
-        y (torch.Tensor): Count of volunteer votes for each answer, of shape (batch, answers)
-        question_index_groups (list): Answer indices for each question i.e. [(question.start_index, question.end_index), ...] for all questions. Useful for slicing model predictions by question. See :ref:`schemas`.
-
-    Returns:
-        torch.Tensor: Dirichlet-Multinomial loss. Scalar, summing across answers and taking a mean across the batch i.e. sum(axis=1).mean())
-    """
-    # my func uses sklearn convention y, y_pred
-    return losses.calculate_multiquestion_loss(y, y_pred, question_index_groups).mean() * len(
-        question_index_groups
-    )
-
-
 def load_pretrained_zoobot(checkpoint_loc: str) -> torch.nn.Module:
     """
+    Load a pretrained Zoobot encoder from a LightningModule checkpoint.
+
     Args:
-        checkpoint_loc (str): path to saved LightningModule checkpoint, likely of :class:`ZoobotTree`, :class:`FinetuneableZoobotClassifier`, or :class:`FinetunabelZoobotTree`. Must have .zoobot attribute.
+        checkpoint_loc (str): Path to saved LightningModule checkpoint, likely of :class:`ZoobotTree`, :class:`FinetuneableZoobotClassifier`, or :class:`FinetuneableZoobotTree`. Must have ``.encoder`` attribute.
 
     Returns:
-        torch.nn.Module: pretrained PyTorch encoder within that LightningModule.
+        torch.nn.Module: Pretrained PyTorch encoder within that LightningModule.
     """
     if torch.cuda.is_available():
         map_location = None
     else:
         # necessary to load gpu-trained model on cpu
-        map_location = torch.device("cpu")
-    return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder  # type: ignore
+        map_location = torch.device('cpu')
+
+    # changed
+    try:
+        logging.info('Attempting to load ZoobotTree from checkpoint')
+        return define_model.ZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
+    except TypeError:
+        logging.info('Attempting to load FinetuneableZoobotTree from checkpoint')
+        return FinetuneableZoobotTree.load_from_checkpoint(checkpoint_loc, map_location=map_location).encoder # type: ignore
 
 
 def get_trainer(
@@ -856,33 +800,33 @@ def get_trainer(
     devices="auto",
     accelerator="auto",
     logger=None,
-    **trainer_kwargs,
-) -> pl.Trainer:
+    **trainer_kwargs
+) -> L.Trainer:
     """
     Convenience wrapper to create a PyTorch Lightning Trainer that carries out the finetuning process.
-    Use like so: trainer.fit(model, datamodule)
+    Use like so: ``trainer.fit(model, datamodule)``
 
-    `get_trainer` args are for common Trainer settings e.g. early stopping checkpointing, etc. By default:
+    ``get_trainer`` args are for common Trainer settings e.g. early stopping, checkpointing, etc. By default:
     - Saves the top-k models based on validation loss
-    - Uses early stopping with `patience` i.e. end training if validation loss does not improve after `patience` epochs.
+    - Uses early stopping with ``patience`` (i.e. end training if validation loss does not improve after ``patience`` epochs)
     - Monitors the learning rate (useful when using a learning rate scheduler)
 
     Any extra args not listed below are passed directly to the PyTorch Lightning Trainer.
-    Use this to add any custom configuration not covered by the `get_trainer` args.
+    Use this to add any custom configuration not covered by the ``get_trainer`` args.
     See https://lightning.ai/docs/pytorch/stable/common/trainer.html
 
     Args:
-        save_dir (str): folder in which to save checkpoints and logs.
-        file_template (str, optional): custom naming for checkpoint files. See Lightning docs. Defaults to "{epoch}".
-        save_top_k (int, optional): save the top k checkpoints only. Defaults to 1.
-        max_epochs (int, optional): train for up to this many epochs. Defaults to 100.
-        patience (int, optional): wait up to this many epochs for decreasing loss before ending training. Defaults to 10.
-        devices (str, optional): number of devices for training (typically, num. GPUs). Defaults to 'auto'.
-        accelerator (str, optional): which device to use (typically 'gpu' or 'cpu'). Defaults to 'auto'.
-        logger (pl.loggers.wandb_logger, optional): If pl.loggers.wandb_logger, track experiment on Weights and Biases. Defaults to None.
+        save_dir (str): Folder in which to save checkpoints and logs.
+        file_template (str, optional): Custom naming for checkpoint files. See Lightning docs. Defaults to ``"{epoch}"``.
+        save_top_k (int, optional): Save the top k checkpoints only. Defaults to ``1``.
+        max_epochs (int, optional): Train for up to this many epochs. Defaults to ``100``.
+        patience (int, optional): Wait up to this many epochs for decreasing loss before ending training. Defaults to ``10``.
+        devices (str, optional): Number of devices for training (typically, num. GPUs). Defaults to ``'auto'``.
+        accelerator (str, optional): Which device to use (typically ``'gpu'`` or ``'cpu'``). Defaults to ``'auto'``.
+        logger (L.pytorch.loggers.wandb_logger, optional): If ``L.pytorch.loggers.wandb_logger``, track experiment on Weights and Biases. Defaults to ``None``.
 
     Returns:
-        pl.Trainer: PyTorch Lightning trainer object for finetuning a model on a GalaxyDataModule.
+        L.Trainer: PyTorch Lightning trainer object for finetuning a model on a GalaxyDataModule.
     """
 
     checkpoint_callback = ModelCheckpoint(
@@ -904,7 +848,7 @@ def get_trainer(
     learning_rate_monitor_callback = LearningRateMonitor(logging_interval="epoch")
 
     # Initialise pytorch lightning trainer
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         logger=logger,
         callbacks=[
             checkpoint_callback,
@@ -923,18 +867,18 @@ def get_trainer(
 def download_from_name(class_name: str, hub_name: str):
     """
     Download a finetuned model from the HuggingFace Hub by name.
-    Used to load pretrained Zoobot models by name, e.g. FinetuneableZoobotClassifier(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...).
+    Used to load pretrained Zoobot models by name, e.g. ``FinetuneableZoobotClassifier(name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano', ...)``.
 
-    Downloaded models are saved to the HuggingFace cache directory for later use (typically ~/.cache/huggingface).
+    Downloaded models are saved to the HuggingFace cache directory for later use (typically ``~/.cache/huggingface``).
 
     You shouldn't need to call this; it's used internally by the FinetuneableZoobot classes.
 
     Args:
-        class_name (str): one of FinetuneableZoobotClassifier, FinetuneableZoobotRegressor, FinetuneableZoobotTree
-        hub_name (str): e.g. mwalmsley/zoobot-encoder-convnext_nano
+        class_name (str): One of ``FinetuneableZoobotClassifier``, ``FinetuneableZoobotRegressor``, ``FinetuneableZoobotTree``.
+        hub_name (str): e.g. ``mwalmsley/zoobot-encoder-convnext_nano``.
 
     Returns:
-        str: path to downloaded model (in HuggingFace cache directory). Likely then loaded by Lightning.
+        str: Path to downloaded model (in HuggingFace cache directory). Likely then loaded by Lightning.
     """
     from huggingface_hub import hf_hub_download
 
@@ -944,4 +888,5 @@ def download_from_name(class_name: str, hub_name: str):
     else:
         repo_id = hub_name
     downloaded_loc = hf_hub_download(repo_id=repo_id, filename=f"{class_name}.ckpt")
+    return downloaded_loc
     return downloaded_loc

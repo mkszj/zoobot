@@ -4,6 +4,7 @@ from zoobot.pytorch.training import train_with_pytorch_lightning
 from zoobot.shared import schemas
 
 from galaxy_datasets.shared.demo_gz_candels import demo_gz_candels
+from galaxy_datasets import transforms
 
 @pytest.fixture
 def schema():
@@ -18,7 +19,7 @@ def train_catalog(tmp_path):
     return train_catalog
 
 
-def test_train_rings(tmp_path, schema, train_catalog):
+def test_train_candels(tmp_path, schema, train_catalog):
 
     save_dir = tmp_path / "save_dir"
     save_dir.mkdir()
@@ -30,5 +31,6 @@ def test_train_rings(tmp_path, schema, train_catalog):
         epochs=1,
         gpus=0,
         batch_size=32,
-        wandb_logger=None
+        wandb_logger=None,
+        transform_cfg=transforms.default_view_config()
     )

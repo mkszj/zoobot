@@ -1,7 +1,7 @@
 from torch.utils.tensorboard import SummaryWriter
 from torch import Tensor
 import torch
-from pytorch_lightning.callbacks import Callback
+from lightning.pytorch.callbacks import Callback
 
 from typing import Any, Callable, Dict, List, Optional
 
@@ -46,20 +46,20 @@ class MetricsWriter(Callback):
         self.__training_epochs_logged = 0
         self.__mode = mode
         
-    def __zero_batch_metrics(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def __zero_batch_metrics(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         for k, _ in self.__batch_value_sum.items():
             self.__batch_value_sum[k] = 0.0
         self.__batches_counted = 0
         self.__training_epochs_logged += 1
         
-    def __log_epoch_metrics(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def __log_epoch_metrics(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         for k, v in self.__batch_value_sum.items():
             self.__writer.add_scalar(tag=f'{self.__mode}/mean_batch_{k}',
                                     scalar_value=v/self.__batches_counted,
                                     global_step=self.__training_epochs_logged)
             
     def __log_batch_metrics(
-            self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: Any, batch: Any, batch_idx: int
+            self, trainer: "L.Trainer", pl_module: "L.LightningModule", outputs: Any, batch: Any, batch_idx: int
         ) -> None:
         if type(outputs) == dict:
             loss = outputs['loss']
@@ -76,44 +76,44 @@ class MetricsWriter(Callback):
         for criterion in self.__criterions:
             self.__batch_value_sum[criterion.__name__] += criterion(prediction, batch[1])
         
-    def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_train_epoch_start(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == TRAINING_MODE:
             self.__zero_batch_metrics(trainer = trainer,
                                       pl_module = pl_module)
             
-    def on_validation_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_validation_epoch_start(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == VALIDATION_MODE:
             self.__zero_batch_metrics(trainer = trainer,
                                       pl_module = pl_module)
     
-    def on_test_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_test_epoch_start(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == TEST_MODE:
             self.__zero_batch_metrics(trainer = trainer,
                                       pl_module = pl_module)
         
-    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_train_epoch_end(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == TRAINING_MODE:
             self.__log_epoch_metrics(trainer = trainer,
                                      pl_module = pl_module)
             
-    def on_validation_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_validation_epoch_end(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == VALIDATION_MODE:
             self.__log_epoch_metrics(trainer = trainer,
                                      pl_module = pl_module)
             
-    def on_test_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_test_epoch_end(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
         """Called when the train epoch begins."""
         if self.__mode == TEST_MODE:
             self.__log_epoch_metrics(trainer = trainer,
                                      pl_module = pl_module)
         
     def on_train_batch_end(
-            self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: Any, batch: Any, batch_idx: int
+            self, trainer: "L.Trainer", pl_module: "L.LightningModule", outputs: Any, batch: Any, batch_idx: int
         ) -> None:
         if self.__mode == TRAINING_MODE:
             self.__log_batch_metrics(trainer = trainer,
@@ -123,7 +123,7 @@ class MetricsWriter(Callback):
                                      batch_idx = batch_idx)
             
     def on_validation_batch_end(
-            self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: Any,
+            self, trainer: "L.Trainer", pl_module: "L.LightningModule", outputs: Any,
             batch: Any, batch_idx: int, dataloader_idx: int
         ) -> None:
         if self.__mode == VALIDATION_MODE:
@@ -134,7 +134,7 @@ class MetricsWriter(Callback):
                                      batch_idx = batch_idx)
             
     def on_test_batch_end(
-            self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: Any,
+            self, trainer: "L.Trainer", pl_module: "L.LightningModule", outputs: Any,
             batch: Any, batch_idx: int, dataloader_idx: int
         ) -> None:
         if self.__mode == TEST_MODE:
