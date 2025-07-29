@@ -14,7 +14,7 @@ from torchvision.transforms.v2 import Compose
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 
 
-def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, label_cols: List[str], inference_transform: Compose, datamodule_kwargs={}, trainer_kwargs={}) -> pd.DataFrame:
+def predict(catalog: pd.DataFrame, model: L.LightningModule, label_cols: List[str], inference_transform: Compose, save_loc=None, datamodule_kwargs={}, trainer_kwargs={}) -> pd.DataFrame:
     """
     Use trained model to make predictions on a catalog of galaxies.
 
@@ -66,26 +66,31 @@ def predict(catalog: pd.DataFrame, model: L.LightningModule, save_loc: str, labe
 
     predictions: torch.Tensor = torch.cat(trainer.predict(model, predict_datamodule), dim=0)  # in latest version, now a tensor
     logging.info('Predictions complete - {}'.format(predictions.shape))
-    
-    logging.info(f'Saving predictions to {save_loc}')
-    # predictions: pd.DataFrame = pd.concat(trainer.predict(model, predict_datamodule), axis=0)  # in latest version, now a dataframe
+
     prediction_df = pd.DataFrame(predictions.numpy(), columns=label_cols)  # convert to pandas dataframe
     prediction_df['id_str'] = image_id_strs  # add the id_str column
-    prediction_df.to_csv(save_loc, index=False)  # RegressionBaseline returns pandas dataframe, do I want this, or hdf5?
-    # probably just dataframe, since I only load to dataframe next anyway, and I never used repeated draws
 
-    # if save_loc.endswith('.csv'):      # save as pandas df
-    #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
-    # elif save_loc.endswith('.hdf5'):
-    #     save_predictions.predictions_to_hdf5(predictions, image_id_strs, label_cols, save_loc)
-    # else:
-    #     logging.warning('Save format of {} not recognised - assuming csv'.format(save_loc))
-    #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
+    if save_loc:
+    
+        logging.info(f'Saving predictions to {save_loc}')
+        # predictions: pd.DataFrame = pd.concat(trainer.predict(model, predict_datamodule), axis=0)  # in latest version, now a dataframe
 
-    logging.info(f'Predictions saved to {save_loc}')
 
-    end = datetime.datetime.fromtimestamp(time.time())
-    logging.info('Completed at: {}'.format(end.strftime('%Y-%m-%d %H:%M:%S')))
-    logging.info('Time elapsed: {}'.format(end - start))
+        prediction_df.to_csv(save_loc, index=False)  # RegressionBaseline returns pandas dataframe, do I want this, or hdf5?
+        # probably just dataframe, since I only load to dataframe next anyway, and I never used repeated draws
+
+        # if save_loc.endswith('.csv'):      # save as pandas df
+        #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
+        # elif save_loc.endswith('.hdf5'):
+        #     save_predictions.predictions_to_hdf5(predictions, image_id_strs, label_cols, save_loc)
+        # else:
+        #     logging.warning('Save format of {} not recognised - assuming csv'.format(save_loc))
+        #     save_predictions.predictions_to_csv(predictions, image_id_strs, label_cols, save_loc)
+
+        logging.info(f'Predictions saved to {save_loc}')
+
+        end = datetime.datetime.fromtimestamp(time.time())
+        logging.info('Completed at: {}'.format(end.strftime('%Y-%m-%d %H:%M:%S')))
+        logging.info('Time elapsed: {}'.format(end - start))
 
     return prediction_df
