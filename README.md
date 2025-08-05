@@ -175,9 +175,17 @@ You might be interested in reading papers using Zoobot:
 - [Rare Galaxy Classes Identified In Foundation Model Representations](https://arxiv.org/abs/2312.02910) (2023)
 - [Astronomaly at Scale: Searching for Anomalies Amongst 4 Million Galaxies](https://arxiv.org/abs/2309.08660) (2024)
 - [Transfer learning for galaxy feature detection: Finding Giant Star-forming Clumps in low redshift galaxies using Faster R-CNN](https://arxiv.org/abs/2312.03503) (2024)
-- [Euclid preparation. Measuring detailed galaxy morphologies for Euclid with Machine Learning](https://arxiv.org/abs/2402.10187) (2024, submitted)
-- [Scaling Laws for Galaxy Images](https://arxiv.org/abs/2404.02973) (2024, submitted)
-- [Galaxy Zoo Evo: 107M volunteer labels for 823k galaxy images](https://huggingface.co/collections/mwalmsley/galaxy-zoo-evo-66532c6c258f5fad31f31880) (2024, submitted)
+- [Euclid preparation. Measuring detailed galaxy morphologies for Euclid with Machine Learning](https://arxiv.org/abs/2402.10187) (2024)
+- [Scaling Laws for Galaxy Images](https://arxiv.org/abs/2404.02973) (2024, preprint)
+- [Euclid Q1: First visual morphology catalogue](https://arxiv.org/abs/2503.15310) (2025, preprint)
+- [Euclid Q1, A first look at the fraction of bars in massive galaxies at z < 1](https://arxiv.org/abs/2503.15311) (2025, preprint)
+- [Euclid Q1: The Strong Lensing Discovery Engine A -- System overview and lens catalogue](https://arxiv.org/abs/2503.15324) (2025, preprint)
+- [Euclid Q1. The Strong Lensing Discovery Engine C: Finding lenses with machine learning](https://arxiv.org/abs/2503.15326) (2025, preprint)
+- [Euclid Q1. The Strong Lensing Discovery Engine D -- Double-source-plane lens candidates](https://arxiv.org/abs/2503.15327) (2025, preprint)
+- [Euclid Q1. The Strong Lensing Discovery Engine E -- Ensemble classification of strong gravitational lenses: lessons for Data Release 1](https://arxiv.org/abs/2503.15328) (2025, preprint)
+- [Euclid: Q1: A census of dwarf galaxies across a range of distances and environments](https://arxiv.org/abs/2503.15335) (2025, preprint)
+- [Euclid Q1: Exploring galaxy morphology across cosmic time through Sersic fits](https://arxiv.org/abs/2503.15309) (2025, preprint)
+- [Galaxy Zoo Evo: 107M volunteer labels for 823k galaxy images](https://huggingface.co/collections/mwalmsley/galaxy-zoo-evo-66532c6c258f5fad31f31880) (2025, submitted)
 
 Many other works use Zoobot indirectly via the [Galaxy Zoo DECaLS](https://arxiv.org/abs/2102.08414) and [Galaxy Zoo DESI](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/stad2919/7283169?login=false) morphology catalogs, for example:
 
