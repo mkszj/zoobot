@@ -242,6 +242,10 @@ class FinetuneableZoobotAbstract(L.LightningModule):
                 group['lr'] *= group['lr_scale']
             return optimizer
 
+    # https://lightning.ai/docs/pytorch/stable/common/optimization.html#bring-your-own-custom-learning-rate-schedulers
+    def lr_scheduler_step(self, scheduler, metric):
+        scheduler.step(epoch=self.current_epoch) 
+            
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
