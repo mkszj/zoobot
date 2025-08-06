@@ -753,7 +753,7 @@ def mse_loss(y_pred, y):
     Returns:
         torch.Tensor: See docstring of ``torch.nn.functional.mse_loss``.
     """
-    return F.mse_loss(y_pred, y, reduction="none")
+    return F.mse_loss(y_pred, y.float(), reduction="none")
 
 
 def l1_loss(y_pred, y):
