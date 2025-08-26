@@ -370,9 +370,10 @@ class FinetuneableZoobotClassifier(FinetuneableZoobotAbstract):
 
         super().__init__(**super_kwargs)
 
+        if label_col == 'label':
+            logging.warning("Zoobot is using the default label_col='label'. If you would like to use a different column for your labels, specify it with FinetuneableZoobotClassifier(label_col=<your_column_name>, ...)")
         self.label_col = label_col
-
-        self.label_col = label_col
+        
 
         logging.info("Using classification head and cross-entropy loss")
         self.head = LinearHead(
