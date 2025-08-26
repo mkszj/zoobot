@@ -536,6 +536,8 @@ class FinetuneableZoobotRegressor(FinetuneableZoobotAbstract):
 
         super().__init__(**super_kwargs)
 
+        if label_col == 'label':
+            logging.warning("Zoobot is using the default label_col='label'. If you would like to use a different column for your labels, specify it with FinetuneableZoobotRegressor(label_col=<your_column_name>, ...)")
         self.label_col = label_col  # TODO could add MultipleLabelRegressor, Nasser working on this
 
         self.unit_interval = unit_interval
@@ -892,5 +894,4 @@ def download_from_name(class_name: str, hub_name: str):
     else:
         repo_id = hub_name
     downloaded_loc = hf_hub_download(repo_id=repo_id, filename=f"{class_name}.ckpt")
-    return downloaded_loc
     return downloaded_loc
