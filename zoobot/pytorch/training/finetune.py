@@ -893,4 +893,169 @@ def download_from_name(class_name: str, hub_name: str):
         repo_id = hub_name
     downloaded_loc = hf_hub_download(repo_id=repo_id, filename=f"{class_name}.ckpt")
     return downloaded_loc
-    return downloaded_loc
+
+
+
+class FinetuneableZoobotMetadataAbstract(FinetuneableZoobotAbstract):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def run_step_through_model(self, batch):
+        # part of training/val/test for all subclasses
+        image, y = self.batch_to_supervised_tuple(batch)
+        y_pred = self.forward(batch)
+             
+        # must be subclasses and specified
+        loss = self.loss(y_pred, y)  # type:ignore
+        loss.float()
+        return y, y_pred, loss
+    
+    
+    
+class FinetuneableZoobotMetadataClassifier(FinetuneableZoobotMetadataAbstract, FinetuneableZoobotClassifier):    
+    def __init__(
+            self,
+            num_classes: int,
+            label_col: str = 'label',
+            label_smoothing=0.,
+            class_weights=None,
+            metadata_cols=None,
+
+            run_linear_sanity_check: bool = False,
+            **super_kwargs) -> None:
+
+        super().__init__(
+            num_classes=num_classes,
+            label_col=label_col,
+            label_smoothing=label_smoothing,
+            class_weights=class_weights,
+            **super_kwargs
+        )
+
+        self.label_col = label_col
+        
+        logging.info("Using classification head and cross-entropy loss")
+        self.head = LinearHead(
+            input_dim=self.encoder_dim,  # type: ignore
+            output_dim=num_classes,
+            head_dropout_prob=self.head_dropout_prob,
+        )
+        self.label_smoothing = label_smoothing
+
+        # if isinstance(class_weights, list) or isinstance(class_weights, np.ndarray):
+        if class_weights is not None:
+            # https://lightning.ai/docs/pytorch/stable/accelerators/accelerator_prepare.html#init-tensors-using-tensor-to-and-register-buffer
+            self.register_buffer("class_weights", torch.Tensor(class_weights))
+            print(self.class_weights, self.class_weights.device)  # type: ignore
+            # can now use self.class_weights in forward pass and will be on correct device (because treated as model parameters)
+        else:
+            self.class_weights = None
+
+        self.loss = partial(cross_entropy_loss,
+                            weight=self.class_weights,
+                            label_smoothing=self.label_smoothing)
+        logging.info(f'num_classes: {num_classes}')
+
+        if num_classes == 2:
+            logging.info("Using binary classification")
+            task = "binary"
+        else:
+            logging.info("Using multi-class classification")
+            task = "multiclass"
+        self.train_acc = tm.Accuracy(task=task, average="micro", num_classes=num_classes)
+        self.val_acc = tm.Accuracy(task=task, average="micro", num_classes=num_classes)
+        self.test_acc = tm.Accuracy(task=task, average="micro", num_classes=num_classes)
+
+        self.run_linear_sanity_check = run_linear_sanity_check
+        
+        self.metadata_cols = metadata_cols or []
+        metadata_dim = len(self.metadata_cols)
+        
+        prev_head = self.head
+        self.head = LinearHead(
+            input_dim=prev_head.input_dim + metadata_dim,
+            output_dim=num_classes,
+            head_dropout_prob=prev_head.dropout.p,
+        )
+        
+    def forward(self, batch):
+        x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
+        x = self.encoder(x)
+
+        # collect metadata columns as tensor
+        if self.metadata_cols:
+            metadata = torch.cat([
+                torch.tensor(batch[col], dtype=torch.float, device=x.device).unsqueeze(1)
+                for col in self.metadata_cols
+            ], dim=1)
+            x = torch.cat([x, metadata], dim=1)
+
+        x = self.head(x)
+        return x
+
+
+class FinetuneableZoobotMetadataRegressor(FinetuneableZoobotMetadataAbstract, FinetuneableZoobotRegressor): 
+    def __init__(
+            self,
+            label_col: str = 'label',
+            loss: str = 'mse',
+            unit_interval: bool = False,
+            metadata_cols=None,
+
+            **super_kwargs) -> None:
+
+        super().__init__(**super_kwargs)
+
+        self.label_col = label_col  # TODO could add MultipleLabelRegressor, Nasser working on this
+
+        self.unit_interval = unit_interval
+        if self.unit_interval:
+            logging.info("unit_interval=True, using sigmoid activation for finetunng head")
+            head_activation = torch.nn.functional.sigmoid
+        else:
+            head_activation = None
+
+        logging.info("Using classification head and cross-entropy loss")
+        self.head = LinearHead(
+            input_dim=self.encoder_dim,
+            output_dim=1,
+            head_dropout_prob=self.head_dropout_prob,
+            activation=head_activation,
+        )
+        if loss in ["mse", "mean_squared_error"]:
+            self.loss = mse_loss
+        elif loss in ["mae", "mean_absolute_error", "l1", "l1_loss"]:
+            self.loss = l1_loss
+        else:
+            raise ValueError(f"Loss {loss} not recognised. Must be one of mse, mae")
+
+        # rmse metrics. loss is mse already.
+        self.train_rmse = tm.MeanSquaredError(squared=False)
+        self.val_rmse = tm.MeanSquaredError(squared=False)
+        self.test_rmse = tm.MeanSquaredError(squared=False)
+        
+        self.metadata_cols = metadata_cols or []
+        metadata_dim = len(self.metadata_cols)
+        
+        prev_head = self.head
+        self.head = LinearHead(
+            input_dim=prev_head.input_dim + metadata_dim,
+            output_dim=prev_head.output_dim,
+            head_dropout_prob=prev_head.dropout.p,
+        )
+        
+        
+    def forward(self, batch):
+        x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
+        x = self.encoder(x)
+
+        # collect metadata columns as tensor
+        if self.metadata_cols:
+            metadata = torch.cat([
+                torch.tensor(batch[col], dtype=torch.float, device=x.device).unsqueeze(1)
+                for col in self.metadata_cols
+            ], dim=1)
+            x = torch.cat([x, metadata], dim=1)
+
+        x = self.head(x)
+        return x
