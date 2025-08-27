@@ -978,11 +978,20 @@ class FinetuneableZoobotMetadataClassifier(FinetuneableZoobotMetadataAbstract, F
             head_dropout_prob=prev_head.dropout.p,
         )
         
+        
+    def predict_step(self, x: Union[list[torch.Tensor], torch.Tensor], batch_idx):
+        # overrides abstract version
+        x = self.forward(x)  # type: ignore # logits from LinearHead
+        # then applies softmax. Only in predict step because we prefer logits for gradient stability during training
+        return F.softmax(x, dim=1)
+        
+        
     def forward(self, batch):
         x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
         x = self.encoder(x)
 
         # collect metadata columns as tensor
+        print(batch.keys())
         if self.metadata_cols:
             metadata = torch.cat([
                 torch.tensor(batch[col], dtype=torch.float, device=x.device).unsqueeze(1)
@@ -1043,8 +1052,12 @@ class FinetuneableZoobotMetadataRegressor(FinetuneableZoobotMetadataAbstract, Fi
             output_dim=prev_head.output_dim,
             head_dropout_prob=prev_head.dropout.p,
         )
-        
-        
+    
+    
+    def predict_step(self, x: torch.Tensor, batch_idx):
+        return self.forward(x)
+    
+     
     def forward(self, batch):
         x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
         x = self.encoder(x)
