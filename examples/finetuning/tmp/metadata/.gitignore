@@ -1,0 +1,6 @@
+*.csv
+imgs/
+rot/
+training/
+*.ckpt
+lightning_logs/
