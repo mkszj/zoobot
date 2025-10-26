@@ -1059,13 +1059,15 @@ class FinetuneableZoobotMetadataRegressor(FinetuneableZoobotMetadataAbstract, Fi
     
      
     def forward(self, batch):
-        x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
+        # x = torch.tensor(batch['image'], dtype=torch.float, device=self.device)
+        x = batch['image']
         x = self.encoder(x)
 
         # collect metadata columns as tensor
         if self.metadata_cols:
             metadata = torch.cat([
-                torch.tensor(batch[col], dtype=torch.float, device=x.device).unsqueeze(1)
+                # torch.tensor(batch[col], dtype=torch.float, device=x.device).unsqueeze(1)
+                batch[col].unsqueeze(1)
                 for col in self.metadata_cols
             ], dim=1)
             x = torch.cat([x, metadata], dim=1)
