@@ -1,12 +1,38 @@
 import logging
 import os
+import torch
+
+torch.set_float32_matmul_precision('medium')
 
 from zoobot.pytorch.training import finetune
-from galaxy_datasets import demo_rings
+from galaxy_datasets import demo_rings, gz2, gz_rings
 from galaxy_datasets.pytorch.galaxy_datamodule import CatalogDataModule
 from galaxy_datasets.transforms import default_view_config, get_galaxy_transform
 
 if __name__ == '__main__':
+    
+    # load catalog (set download=True if files are not already present)
+    train_catalog, label_cols = gz_rings(
+        root='C:/MASTERFOLDER/Programming/testrun',
+        train=True,
+        download=False
+    )
+
+    print("=== label_cols returned by gz2() ===")
+    print(label_cols)
+    print()
+
+    print("=== Columns in catalog ===")
+    print(train_catalog.columns.tolist())
+    print()
+
+    print("=== DataFrame info (dtypes, non-null counts) ===")
+    print(train_catalog.info())
+    print()
+
+    print("=== First 10 rows (quick look) ===")
+    print(train_catalog.head(10))
+
 
     logging.basicConfig(level=logging.INFO)
 
@@ -20,21 +46,23 @@ if __name__ == '__main__':
         data_dir = '/Users/user/repos/galaxy-datasets/roots/demo_rings'
     elif os.path.isdir('/home/walml/repos'):  # run on local machine
         data_dir = '/home/walml/repos/galaxy-datasets/roots/demo_rings'
+    elif os.path.isdir('C:\\MASTERFOLDER\\Programming\\testrun'):  # this is meeeeeeeeeeee
+        data_dir = 'C:\\MASTERFOLDER\\Programming\\testrun'
  
-    train_catalog, _ = demo_rings(root=data_dir, download=True, train=True)
-    test_catalog, _ = demo_rings(root=data_dir, download=True, train=False)
+    train_catalog, _ = gz_rings(root=data_dir, download=True, train=True)
+    test_catalog, _ = gz_rings(root=data_dir, download=True, train=False)
 
     # wondering about "label_cols"? 
     # This is a list of catalog columns which should be used as labels
     # Here:
-    label_cols = ['ring']
+    label_cols = ['has-spiral-arms-gz2_yes']
     # For binary classification, the label column should have binary (0 or 1) labels for your classes
     # To support more complicated labels, Zoobot expects a list of columns. A list with one element works fine.
 
     greyscale = True
    
     # save the finetuning results here
-    save_dir = 'results/finetune_binary_classification'
+    save_dir = 'C:\\MASTERFOLDER\\Programming\\testrun'
 
     transform_cfg = default_view_config()
     transform_cfg.output_size = 128  # set to the size you want your images to be resized to
@@ -59,7 +87,7 @@ if __name__ == '__main__':
       name='hf_hub:mwalmsley/zoobot-encoder-convnext_nano',
       num_classes=2,
       training_mode='head_only',
-      label_col='ring',
+      label_col='has-spiral-arms-gz2_yes',
       greyscale=greyscale
     )
     # under the hood, this does:
@@ -67,7 +95,7 @@ if __name__ == '__main__':
     # model = finetune.FinetuneableZoobotClassifier(encoder=encoder, ...)
 
     # retrain to find rings
-    trainer = finetune.get_trainer(save_dir, accelerator='cpu', max_epochs=1)
+    trainer = finetune.get_trainer(save_dir, accelerator='gpu', max_epochs=50)
     trainer.fit(model, datamodule)
     # can now use this model or saved checkpoint to make predictions on new data. Well done!
 
@@ -80,8 +108,8 @@ if __name__ == '__main__':
     preds = predict_on_catalog.predict(
       test_catalog,
       finetuned_model,
-      inference_transform=transform,
-      label_cols=['not_ring', 'ring'],  # will be used to name the output columns
+      inference_transform=transform, 
+      label_cols=['has-spiral-arms-gz2_yes'],  # will be used to name the output columns
       save_loc=os.path.join(save_dir, 'finetuned_predictions.csv'),
       datamodule_kwargs={'batch_size': 32},  # we also need to set batch size here, or you may run out of memory
       trainer_kwargs={'accelerator': 'gpu'}  
