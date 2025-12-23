@@ -17,15 +17,14 @@ from zoobot.pytorch.training.finetune import (
 # ---------------------------------------------------------------------
 
 data_dir = "C:/MASTERFOLDER/Programming/testrun3d"
-save_dir = data_dir
+save_dir = "C:/MASTERFOLDER/Programming/test_zoobot_runs"
 
 label_columns = [
-    "smooth-or-featured-gz2_smooth",
-    "smooth-or-featured-gz2_featured-or-disk",
-    "smooth-or-featured-gz2_artifact",
+    "has-spiral-arms-gz2_yes",
+    "has-spiral-arms-gz2_no",
 ]
 
-num_classes = 3
+num_classes = 2
 batch_size = 16       #safe for RTX 3050 4GB
 max_epochs = 10       #short for test run
 
@@ -85,7 +84,7 @@ if __name__ == "__main__":
     model = FinetuneableZoobotClassifier(
         name="hf_hub:mwalmsley/zoobot-encoder-convnext_nano",
         num_classes=num_classes,
-        label_col=label_columns,
+        label_col="has-spiral-arms-gz2_yes",
         training_mode="head_only",
         greyscale=True,
     )
@@ -104,6 +103,21 @@ if __name__ == "__main__":
     # train sequence
     # --------------------------------------------------
 
+    datamodule.setup("fit")
+    batch = next(iter(datamodule.train_dataloader()))
+
+    print("Batch keys:", batch.keys())
+
+    for k, v in batch.items():
+        print(f"\nKey: {k}")
+        print("  type:", type(v))
+        if hasattr(v, "shape"):
+            print("  shape:", v.shape)
+            print("  dtype:", v.dtype)
+            print("  min:", v.min().item() if v.numel() else None)
+            print("  max:", v.max().item() if v.numel() else None)
+
+    trainer.fit(model, datamodule)
     print("Zoobot-3D training complete")
 
     best_ckpt = trainer.checkpoint_callback.best_model_path
